@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 if (!process.env.GEMINI_API_KEY && existsSync(".env.local")) {
   for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
     const m = line.match(/^\s*([A-Z_]+)\s*=\s*(.*)\s*$/);
-    if (m && !process.env[m[1]!]) process.env[m[1]!] = m[2]!.replace(/^["']|["']$/g, "");
+    if (m && !process.env[m[1]!]) process.env[m[1]!] = m[2]!.trim().replace(/^["']|["']$/g, "");
   }
 }
 if (!process.env.GEMINI_API_KEY) { console.error("✗ GEMINI_API_KEY not set (env or .env.local)"); process.exit(1); }
