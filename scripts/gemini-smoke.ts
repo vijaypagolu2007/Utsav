@@ -1,7 +1,7 @@
 // Live Gemini smoke test. Needs GEMINI_API_KEY in the environment or in .env.local.
 //   npm run smoke:gemini
 import { existsSync, readFileSync } from "node:fs";
-import { geminiModel } from "../src/gemini-model";
+import { geminiModels, withGeminiRetry } from "../src/gemini-model";
 
 if (!process.env.GEMINI_API_KEY && existsSync(".env.local")) {
   for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
@@ -11,14 +11,17 @@ if (!process.env.GEMINI_API_KEY && existsSync(".env.local")) {
 }
 const KEY = process.env.GEMINI_API_KEY ?? "";
 if (!KEY) { console.error("✗ GEMINI_API_KEY not set (env or .env.local)"); process.exit(1); }
-console.log(`key: ${KEY.length} chars, ${/\s|["']/.test(KEY) ? "contains spaces or quotes (check .env.local)" : "format ok"}, model: ${geminiModel()}`);
+console.log(`key: ${KEY.length} chars, ${/\s|["']/.test(KEY) ? "contains spaces or quotes (check .env.local)" : "format ok"}, models: ${geminiModels().join(" → ")}`);
 
 // Call Gemini once directly so a bad key / blocked network shows the real error instead of a silent fallback.
 async function ping() {
   const { GoogleGenAI } = await import("@google/genai");
   try {
-    const r = await new GoogleGenAI({ apiKey: KEY }).models.generateContent({ model: geminiModel(), contents: "Reply with OK" });
-    console.log(`✓ direct ping: "${(r.text ?? "").trim().slice(0, 40)}"`);
+    const ai = new GoogleGenAI({ apiKey: KEY });
+    let used = "";
+    const r = await withGeminiRetry(model => { used = model; return ai.models.generateContent({ model, contents: "Reply with OK" }); },
+      { delaysMs: [2000, 5000, 10000], onRetry: ({ model, attempt }) => console.log(`  … ${model} busy (attempt ${attempt}), retrying`) });
+    console.log(`✓ direct ping (${used}): "${(r.text ?? "").trim().slice(0, 40)}"`);
     return true;
   } catch (e) {
     console.log(`✗ direct ping failed: ${e instanceof Error ? e.message.slice(0, 400) : String(e)}`);

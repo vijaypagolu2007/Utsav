@@ -579,3 +579,23 @@ describe("bug fixes (round 3)", () => {
     assert.equal(bad.state, royalWedding);
   });
 });
+
+describe("Gemini retry", () => {
+  test("retries 503s, falls through to a fallback model, never retries a 4xx", async () => {
+    const { withGeminiRetry, isTransientGeminiError } = await import("../gemini-model");
+    const prev = process.env.GEMINI_FALLBACK_MODELS;
+    process.env.GEMINI_FALLBACK_MODELS = "backup-model";
+    try {
+      const seen: string[] = [];
+      const out = await withGeminiRetry(async m => { seen.push(m); if (m !== "backup-model") throw new Error('{"error":{"code":503,"status":"UNAVAILABLE"}}'); return "ok"; }, { delaysMs: [1, 1] });
+      assert.equal(out, "ok");
+      assert.equal(seen.length, 4); // 3 tries on the primary, then the fallback
+      let calls = 0;
+      await assert.rejects(withGeminiRetry(async () => { calls++; throw new Error('{"error":{"code":404}}'); }, { delaysMs: [1, 1] }));
+      assert.equal(calls, 1);
+      assert.equal(isTransientGeminiError(new Error("This model is currently experiencing high demand")), true);
+    } finally {
+      if (prev === undefined) delete process.env.GEMINI_FALLBACK_MODELS; else process.env.GEMINI_FALLBACK_MODELS = prev;
+    }
+  });
+});

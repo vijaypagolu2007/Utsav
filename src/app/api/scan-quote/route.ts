@@ -3,7 +3,7 @@
 //   • multipart file, or { dataUrl }     → Gemini Vision with structured JSON output (needs GEMINI_API_KEY)
 //   • a plain-text upload                → deterministic parser
 // Whatever reads the document, the result is one upsert_vendor_quote command, dry-run as a Tier-1 approval card.
-import { geminiModel } from "@/gemini-model";
+import { withGeminiRetry } from "@/gemini-model";
 import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -22,8 +22,8 @@ const OK_MIME = /^(image\/(png|jpe?g|webp|heic|heif)|application\/pdf|text\/plai
 async function extractWithGemini(apiKey: string, mimeType: string, base64: string, st: AgentState, today: string): Promise<ScannedQuote> {
   const ai = new GoogleGenAI({ apiKey });
   const lines = st.budgetItems.map(b => `${b.category}: ${b.label}`).join("\n");
-  const res = await ai.models.generateContent({
-    model: geminiModel(),
+  const res = await withGeminiRetry(model => ai.models.generateContent({
+    model,
     contents: [{ role: "user", parts: [
       { inlineData: { mimeType, data: base64 } },
       { text: `Extract this vendor quote / invoice / contract for "${st.event.title}". Today is ${today}.
@@ -33,7 +33,7 @@ Sub-event slugs: ${st.subEvents.map(s => s.slug).join(", ")}.
 Copy amounts exactly as printed (whole rupees). Do not compute totals. List risky clauses (non-refundable deposits, corkage, overtime, cancellation, hidden taxes, uncapped liability) as redFlags.` },
     ] }],
     config: { responseMimeType: "application/json", responseJsonSchema: geminiSchema(z.toJSONSchema(VisionExtraction, { target: "draft-2020-12", io: "input" })), temperature: 0 },
-  });
+  }));
   const parsed = VisionExtraction.safeParse(JSON.parse(res.text ?? "{}"));
   if (!parsed.success) throw new Error(`Unreadable extraction: ${parsed.error.issues[0]?.message ?? "invalid"}`);
   return visionToScanned(parsed.data, today);

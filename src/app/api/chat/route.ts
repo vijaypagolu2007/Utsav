@@ -1,7 +1,7 @@
 // Gemini co-pilot route. The model only proposes tool calls; every tool runs through the deterministic
 // executor (dry-run reducer, blueprint allocator, insights). If Gemini is missing or fails, the offline
 // demo parser answers the flagship prompts with the very same tools.
-import { geminiModel } from "@/gemini-model";
+import { withGeminiRetry } from "@/gemini-model";
 import { GoogleGenAI, type Content, type FunctionDeclaration, type Part } from "@google/genai";
 import { NextResponse } from "next/server";
 import { AgentState } from "@/schema";
@@ -27,13 +27,12 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 async function runGemini(apiKey: string, req: ChatRequest, st: AgentState, today: string, role: Role): Promise<ChatResponse> {
   const guest = role === "guest";
   const ai = new GoogleGenAI({ apiKey });
-  const model = geminiModel();
   const contents: Content[] = req.messages.slice(-12).map(m => ({ role: m.role === "user" ? "user" : "model", parts: [{ text: m.text }] }));
   const actions: AgentAction[] = [];
   let working = st;
   let reply = "";
   for (let step = 0; step < MAX_STEPS; step++) {
-    const res = await withTimeout(ai.models.generateContent({
+    const res = await withGeminiRetry(model => withTimeout(ai.models.generateContent({
       model, contents,
       config: {
         // Rebuilt every step from `working`, so step > 0 sees the batches already staged this turn.
@@ -41,7 +40,7 @@ async function runGemini(apiKey: string, req: ChatRequest, st: AgentState, today
         tools: [{ functionDeclarations: (guest ? guestFunctionDeclarations : functionDeclarations) as unknown as FunctionDeclaration[] }],
         temperature: 0.2,
       },
-    }), TIMEOUT_MS);
+    }), TIMEOUT_MS), { delaysMs: [800, 2000] });
     const calls = res.functionCalls ?? [];
     if (!calls.length) { reply = res.text ?? ""; break; }
     const modelContent = res.candidates?.[0]?.content;
