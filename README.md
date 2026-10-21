@@ -84,10 +84,13 @@ Both routes fall back to the deterministic offline path when `GEMINI_API_KEY` is
 ## Testing
 `npm run verify` runs, in order: the demo-output check against `src/tests/demo.baseline.txt`, 54 unit tests (`node --test`), `tsc --noEmit`, `eslint --max-warnings=0`, and `next build`.
 
+### Live Gemini smoke test
+With `GEMINI_API_KEY` in `.env.local`, `npm run smoke:gemini` calls the real routes and checks four things: an organizer prompt runs multi-step function calling into a Tier-1 batch, an over-cut gets a counter-offer, a guest budget change is refused, and Gemini Vision reads `samples/deccan-royal-caterers-quote.png` as ₹1,85,000.
+
 ## Deploy
 Works on Vercel as is: import the repo and add `GEMINI_API_KEY` (and optionally `GEMINI_MODEL`) as environment variables.
 
 ## Status
 - ✅ Phases 1–8 complete; all checks green.
-- ⏳ Live Gemini paths (chat function-calling and Vision) still to be tested with a real key.
+- ⏳ Live Gemini paths: run `npm run smoke:gemini` with a real key.
 - ⏳ No browser E2E suite yet (UI verified through the build and API tests).

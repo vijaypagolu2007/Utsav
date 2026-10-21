@@ -11,7 +11,8 @@
     "demo": "tsx src/demo.ts",
     "test": "node --import tsx --test src/tests/*.test.ts",
     "verify": "npm run demo:check && npm test && npm run typecheck && npm run lint && npm run build",
-    "demo:check": "tsx src/demo.ts | diff src/tests/demo.baseline.txt - && echo 'demo output unchanged'"
+    "demo:check": "tsx src/demo.ts | diff src/tests/demo.baseline.txt - && echo 'demo output unchanged'",
+    "smoke:gemini": "tsx scripts/gemini-smoke.ts"
   },
   "license": "ISC",
   "dependencies": {
