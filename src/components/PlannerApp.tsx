@@ -17,6 +17,9 @@ import TaskCard from "./TaskCard";
 import ArchetypeCard from "./ArchetypeCard";
 import GuestMicrosite from "./GuestMicrosite";
 import ChatSidebar, { type ChatMsg, type UIAction } from "./ChatSidebar";
+import { publicCount } from "@/visibility";
+import ShareDialog from "./ShareDialog";
+import { useSharedEvent } from "./useSharedEvent";
 
 export type Highlight = { ids: Set<string>; key: number };
 export type Toast = { id: number; tone: "emerald" | "rose" | "slate"; text: string };
@@ -53,6 +56,7 @@ export default function PlannerApp() {
   const [busy, setBusy] = useState(false);
   const [forceOffline, setForceOffline] = useState(false);
   const [mode, setMode] = useState<"gemini" | "offline" | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const hist = historyOf(store);
   const plan = hist.snaps[hist.idx]!.plan;
@@ -112,6 +116,9 @@ export default function PlannerApp() {
     flash(computePlanDiff(before, after).changedIds);
   };
 
+  // ---------- shared guest links (server copy kept in sync; guest responses merged back in) ----------
+  const shared = useSharedEvent(store.active, plan, merged => { push(merged, "Synced guest responses"); toast("slate", "Guest responses synced"); });
+
   // ---------- chat ----------
   const setAction = (r: Role, msgId: string, actionId: string, patch: Partial<UIAction>) =>
     setMsgs(r, ms => ms.map(m => (m.id !== msgId ? m : { ...m, actions: m.actions?.map(a => (a.id === actionId ? ({ ...a, ...patch } as UIAction) : a)) })));
@@ -140,11 +147,17 @@ export default function PlannerApp() {
     setMsgs(r, ms => [...ms, { id: nid(), role: "user", text: t }]);
     setBusy(true);
     const state = current();
-    const history = chatsRef.current[r].filter(m => m.id !== "welcome").map(m => ({ role: m.role, text: m.text }));
+    const history = chatsRef.current[r].filter(m => m.id !== "welcome").slice(-12).map(m => ({ role: m.role, text: m.text.slice(0, 4000) }));
     const replyId = nid();
     try {
       const res = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ messages: history, state, today, forceOffline, role: r, actingGuestId }) });
+      if (res.status >= 400 && res.status < 500) {
+        // A client error is a real problem with the request: say so instead of pretending to answer.
+        const j = (await res.json().catch(() => ({}))) as { message?: string };
+        ingest(r, { reply: `The server rejected that request: ${j.message ?? `HTTP ${res.status}`}.`, actions: [] }, replyId);
+        return;
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       ingest(r, (await res.json()) as ChatResponse, replyId);
     } catch (e) {
@@ -168,8 +181,8 @@ export default function PlannerApp() {
       form.set("state", JSON.stringify(state)); form.set("today", today); form.set("role", "organizer");
       if ("sampleId" in input) form.set("samplePresetId", input.sampleId); else form.set("file", input.file);
       const res = await fetch("/api/scan-quote", { method: "POST", body: form });
-      const j = (await res.json()) as ScanResponse & { error?: string };
-      if (!res.ok) throw new Error(j.error ?? `HTTP ${res.status}`);
+      const j = (await res.json().catch(() => ({}))) as ScanResponse & { error?: string; message?: string };
+      if (!res.ok) throw new Error(j.message ?? j.error ?? `HTTP ${res.status}`);
       ingest("organizer", { reply: j.reply, actions: j.actions, warning: j.warning, mode: j.source === "gemini" ? "gemini" : "offline" }, replyId);
       if (j.actions.some(a => a.kind === "batch")) toast("slate", "Quote read. Review the red flags and approve to update the budget.");
     } catch (e) {
@@ -207,8 +220,10 @@ export default function PlannerApp() {
           storedTitles={Object.fromEntries(PRESETS.map(p => { const h = store.byType[p.key]; return [p.key, h ? h.snaps[h.idx]!.plan.event.title : null]; }))}
           onSwitch={switchType} onReset={resetPreset} role={role} setRole={setRole}
           history={hist.snaps.map(s => s.label)} historyIdx={hist.idx} goTo={goTo} flash={flash}
-          onExportCsv={exportCsv} onExportRunSheet={exportRunSheet}
+          onExportCsv={exportCsv} onExportRunSheet={exportRunSheet} onShare={() => setShareOpen(true)} shared={!!shared.share}
         />
+        <ShareDialog open={shareOpen} onClose={() => setShareOpen(false)} share={shared.share} status={shared.status}
+          onPublish={() => void shared.publish()} onSync={shared.syncNow} onForget={shared.forget} visibility={publicCount(plan)} />
         <div className="scroll-thin flex-1 overflow-y-auto p-4">
           {role === "guest" ? (
             <GuestMicrosite plan={plan} today={today} commit={commit} highlight={highlight} actingGuestId={actingGuestId} setActingGuestId={setActingGuest} />

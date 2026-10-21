@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { AlertTriangle, CalendarDays, ChevronDown, FileSpreadsheet, History, PartyPopper, Printer, Redo2, RotateCcw, Ticket, Undo2, Users, Wrench } from "lucide-react";
+import { AlertTriangle, CalendarDays, Link2, ChevronDown, FileSpreadsheet, History, PartyPopper, Printer, Redo2, RotateCcw, Ticket, Undo2, Users, Wrench } from "lucide-react";
 import type { AgentState } from "@/schema";
 import type { PlanInsights } from "@/insights";
 import type { Role } from "@/commands";
@@ -14,12 +14,12 @@ type Props = {
   activeType: EventType; storedTitles: Record<string, string | null>; onSwitch: (t: EventType) => void; onReset: () => void;
   role: Role; setRole: (r: Role) => void;
   history: string[]; historyIdx: number; goTo: (i: number) => void; flash: (ids: string[]) => void;
-  onExportCsv: () => void; onExportRunSheet: () => void;
+  onExportCsv: () => void; onExportRunSheet: () => void; onShare: () => void; shared: boolean;
 };
 
 function Kpi({ label, value, sub, tone = "text-slate-900" }: { label: string; value: string; sub?: string; tone?: string }) {
   return (
-    <div className="min-w-0 rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-200">
+    <div className="min-w-0 rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-200" data-testid={`kpi-${label.toLowerCase().replace(/[^a-z]+/g, "-")}`}>
       <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">{label}</div>
       <div className={`truncate text-sm font-semibold tabular-nums ${tone}`}>{value}</div>
       {sub && <div className="truncate text-[10px] text-slate-500">{sub}</div>}
@@ -28,7 +28,7 @@ function Kpi({ label, value, sub, tone = "text-slate-900" }: { label: string; va
 }
 
 export default function CommandBar({ plan, today, setToday, insights, activeType, storedTitles, onSwitch, onReset, role, setRole,
-  history, historyIdx, goTo, flash, onExportCsv, onExportRunSheet }: Props) {
+  history, historyIdx, goTo, flash, onExportCsv, onExportRunSheet, onShare, shared }: Props) {
   const [flagsOpen, setFlagsOpen] = useState(false);
   const guest = role === "guest";
   const total = plan.event.totalBudgetPaise;
@@ -79,6 +79,8 @@ export default function CommandBar({ plan, today, setToday, insights, activeType
               className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"><FileSpreadsheet size={13} className="text-emerald-600" /> ⬇ Export CSV</button>
             <button onClick={onExportRunSheet} title="Print-ready day-of run sheet (Save as PDF from the print dialog)"
               className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"><Printer size={13} className="text-violet-600" /> 🖨️ Print Run-Sheet</button>
+            <button onClick={onShare} title="Shareable guest links (needs shared storage)" data-testid="open-guest-links"
+              className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"><Link2 size={13} className="text-sky-600" /> {shared ? "Guest links ●" : "Guest links"}</button>
           </>)}
           <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600" title="Planning date: move it to time-travel the red flags">
             <CalendarDays size={14} />

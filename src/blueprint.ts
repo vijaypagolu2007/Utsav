@@ -17,6 +17,8 @@ const BlueprintSubEvent = z.object({
   isMain: z.boolean().default(false).describe("Exactly one sub-event is the main one"),
   venue: z.string().default(""),
   dressCode: z.string().default(""),
+  visibility: z.enum(["public", "private"]).default("private")
+    .describe("Shown on the public guest link? Leave private unless the organizer explicitly asked for it to be public"),
 });
 
 const BlueprintBudgetLine = z.object({
@@ -117,7 +119,7 @@ export function initializeEventPlan(input: unknown): InitResult {
       used.add(slug);
       if (s.endMin <= s.startMin) throw new PlanError(`${s.name} ends before it starts`);
       return { id: `se-${slug}`, name: s.name, slug, date: addDays(bp.startDate, s.dayOffset), startMin: s.startMin, endMin: s.endMin,
-        venue: s.venue, dressCode: s.dressCode, isMain: s.isMain, phase: s.isMain ? ("main" as const) : s.phase, collectsRsvp: true };
+        venue: s.venue, dressCode: s.dressCode, isMain: s.isMain, phase: s.isMain ? ("main" as const) : s.phase, collectsRsvp: true, visibility: s.visibility };
     });
     let mains = subEvents.filter(s => s.isMain);
     if (mains.length === 0) {

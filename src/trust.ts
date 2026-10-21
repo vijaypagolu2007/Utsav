@@ -10,6 +10,8 @@ export function commandTier(c: Command): TrustTier {
   switch (c.op) {
     case "adjust_budget": return Math.abs(c.deltaPaise) >= TIER1_BUDGET_THRESHOLD_PAISE ? 1 : 0;
     case "move_sub_event": return 1;
+    // Publishing exposes details to anyone holding the link, so it needs approval; hiding is always safe.
+    case "set_sub_event_visibility": return c.visibility === "public" ? 1 : 0;
     case "record_payment": return 1;
     case "update_sponsor": return c.receivedPaise !== undefined ? 1 : 0;
     case "upsert_vendor_quote": return 1; // always: a quote changes money and vendor terms

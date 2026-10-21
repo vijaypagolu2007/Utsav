@@ -1,5 +1,5 @@
 "use client";
-import { Anchor, CalendarRange, ChevronLeft, ChevronRight, MapPin } from "lucide-react";
+import { Anchor, CalendarRange, ChevronLeft, ChevronRight, Eye, EyeOff, MapPin } from "lucide-react";
 import type { AgentState } from "@/schema";
 import type { Commit, Highlight } from "./PlannerApp";
 import { Badge, Card, Empty, hhmm, phaseTone, prettyDate, useHighlight } from "./ui";
@@ -32,6 +32,13 @@ export default function TimelineCard({ plan, commit, highlight }: { plan: AgentS
                   <span className="text-xs tabular-nums text-slate-500">{hhmm(s.startMin)} – {hhmm(s.endMin)}</span>
                   {s.venue && <span className="flex items-center gap-1 text-xs text-slate-400"><MapPin size={11} />{s.venue}</span>}
                   {s.dressCode && <span className="text-xs text-slate-400">· {s.dressCode}</span>}
+                  <button type="button" data-testid={`visibility-${s.slug}`} aria-pressed={s.visibility === "public"}
+                    title={s.visibility === "public" ? "Shown on the public guest link. Click to hide it (invited households still see it)." : "Only invited households see this on guest links. Click to show it publicly."}
+                    onClick={() => commit({ summary: `${s.visibility === "public" ? "Hide" : "Show"} ${s.name} ${s.visibility === "public" ? "from" : "on"} the public guest link`,
+                      commands: [{ op: "set_sub_event_visibility", subEvent: s.slug, visibility: s.visibility === "public" ? "private" : "public" }] })}
+                    className={`ml-auto flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium ring-1 ${s.visibility === "public" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-slate-50 text-slate-600 ring-slate-200"}`}>
+                    {s.visibility === "public" ? <><Eye size={11} /> Public</> : <><EyeOff size={11} /> Private</>}
+                  </button>
                 </div>
                 {blocks.length > 0 && (
                   <div className="mt-2 space-y-1.5 pl-0 md:pl-28">

@@ -45,7 +45,7 @@ function DiffCard({ a, onApprove, onReject }: { a: Extract<UIAction, { kind: "ba
   const pending = a.status === "pending";
   const isQuote = a.batch.commands.some(c => c.op === "upsert_vendor_quote");
   return (
-    <div className={`rounded-xl border ${a.tier === 0 ? "border-emerald-200 bg-emerald-50/40" : "border-amber-200 bg-amber-50/40"} p-3`}>
+    <div data-testid={a.counterOffer ? "counter-offer-card" : "diff-card"} className={`rounded-xl border ${a.tier === 0 ? "border-emerald-200 bg-emerald-50/40" : "border-amber-200 bg-amber-50/40"} p-3`}>
       <div className="flex items-center gap-2">
         {a.tier === 0 ? <ShieldCheck size={14} className="text-emerald-600" /> : <ShieldAlert size={14} className="text-amber-600" />}
         <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Tier {a.tier} · {a.counterOffer ? "Counter-offer" : TIER_LABEL[a.tier]}</span>
@@ -87,7 +87,7 @@ function RejectionCard({ a }: { a: Extract<UIAction, { kind: "rejection" }> }) {
   const d = a.rejection.diagnostics;
   const cut = Object.entries(d.categoryMaxCuttablePaise).filter(([, v]) => v > 0).sort((x, y) => y[1] - x[1]).slice(0, 6);
   return (
-    <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-3">
+    <div data-testid="rejection-card" className="rounded-xl border border-rose-200 bg-rose-50/50 p-3">
       <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-rose-700"><AlertOctagon size={14} /> Rolled back · command #{a.rejection.failedCommandIndex + 1}</div>
       <div className="mt-1 text-xs text-slate-800">{a.rejection.reason}</div>
       {d.validDatesForSubEvent && (
@@ -183,7 +183,7 @@ export default function ChatSidebar({ messages, busy, onSend, onApprove, onRejec
           <input type="checkbox" checked={forceOffline} onChange={e => setForceOffline(e.target.checked)} className="accent-slate-800" />
           <WifiOff size={12} /> Demo mode
         </label>
-        {mode && <Badge tone={mode === "gemini" ? "emerald" : "slate"}>{mode === "gemini" ? "Gemini" : "Offline"}</Badge>}
+        {mode && <span data-testid="ai-mode"><Badge tone={mode === "gemini" ? "emerald" : "slate"}>{mode === "gemini" ? "Gemini" : "Offline"}</Badge></span>}
       </header>
 
       <div className="scroll-thin flex-1 space-y-3 overflow-y-auto px-4 py-3">
@@ -227,7 +227,7 @@ export default function ChatSidebar({ messages, busy, onSend, onApprove, onRejec
           ))}
         </div>
         <form onSubmit={e => { e.preventDefault(); submit(input); }} className="flex gap-2">
-          <input value={input} onChange={e => setInput(e.target.value)} placeholder={guest ? "Ask about timings, RSVP, claim a gift…" : "Ask, cut, move, plan, draft…"}
+          <input aria-label="Chat message" value={input} onChange={e => setInput(e.target.value)} placeholder={guest ? "Ask about timings, RSVP, claim a gift…" : "Ask, cut, move, plan, draft…"}
             className="min-w-0 flex-1 rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
           <button type="submit" disabled={busy || !input.trim()} aria-label="Send" className="rounded-xl bg-slate-900 px-3 text-white disabled:opacity-40"><Send size={16} /></button>
         </form>

@@ -87,6 +87,8 @@ export const SubEvent = z.looseObject({
   collectsRsvp: z.boolean().default(true),
   isMain: z.boolean().default(false), // the anchor event (the wedding day, the birthday party)
   phase: z.enum(["pre", "main", "post"]).default("pre"), // Haldi is pre, Reception is post
+  // Who sees it on a shared guest link. New and legacy sub-events default to private (fail closed); see visibility.ts.
+  visibility: z.enum(["public", "private"]).default("private"),
 });
 
 // ---------- Budget: planned envelope, then quote, then committed, then paid ----------

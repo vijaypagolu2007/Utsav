@@ -19,6 +19,8 @@ export const ScannedQuote = z.object({
   notes: z.string().default(""),
   redFlags: z.array(z.string()).default([]),
   summary: z.string().default(""),
+  /** Fields the reader flagged as unclear; shown to the organizer before approval. */
+  uncertain: z.array(z.string()).optional(),
 });
 export type ScannedQuote = z.infer<typeof ScannedQuote>;
 
@@ -35,17 +37,53 @@ export const VisionExtraction = z.object({
   notes: z.string().optional().describe("Key terms: cancellation, corkage, overtime, taxes"),
   redFlags: z.array(z.string()).describe("Risky clauses, each one short line starting with ⚠️"),
   summary: z.string().describe("One sentence"),
+  uncertain: z.array(z.string()).optional().describe("Names of fields you could not read clearly or had to interpret (e.g. 'category', 'depositRupees'). Never guess a missing amount: omit it and list it here."),
 });
 export type VisionExtraction = z.infer<typeof VisionExtraction>;
 
+/** Thrown when an extraction is readable JSON but its values can't be trusted. Maps to HTTP 422. */
+export class QuoteValidationError extends Error {
+  constructor(message: string) { super(message); this.name = "QuoteValidationError"; }
+}
+
+/** ₹100 crore: anything above is a misread, not a vendor quote. */
+export const MAX_QUOTE_RUPEES = 1_000_000_000;
+
+/**
+ * Untrusted rupees → integer paise. Rejects non-numbers, NaN/Infinity, negatives, more than 2 decimals and
+ * absurd magnitudes. The conversion goes through the decimal string so 1450.1 can't become 145009.99999.
+ */
+export function rupeesToPaise(n: unknown, field = "amount"): number {
+  if (typeof n !== "number" || !Number.isFinite(n)) throw new QuoteValidationError(`${field} is not a finite number`);
+  if (n < 0) throw new QuoteValidationError(`${field} is negative`);
+  if (n > MAX_QUOTE_RUPEES) throw new QuoteValidationError(`${field} is implausibly large`);
+  const [whole, frac = ""] = n.toFixed(6).replace(/0+$/, "").replace(/\.$/, "").split(".");
+  if (frac.length > 2) throw new QuoteValidationError(`${field} has more than 2 decimal places`);
+  return Number(whole) * 100 + Number(frac.padEnd(2, "0") || "0");
+}
+
+const realDate = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && new Date(d + "T00:00:00Z").toISOString().slice(0, 10) === d;
+
 export function visionToScanned(v: VisionExtraction, today: string): ScannedQuote {
-  const r2p = (n: number | undefined) => (n === undefined || !Number.isFinite(n) ? undefined : Math.round(n * 100));
-  const dueAt = v.dueAt && /^\d{4}-\d{2}-\d{2}$/.test(v.dueAt) ? v.dueAt
-    : v.depositDueInDays !== undefined ? addDays(today, v.depositDueInDays) : undefined;
+  const vendorName = v.vendorName.trim().slice(0, 120), itemLabel = v.itemLabel.trim().slice(0, 160);
+  if (!vendorName) throw new QuoteValidationError("No vendor name found on the document");
+  if (!itemLabel) throw new QuoteValidationError("No quoted item found on the document");
+  const quotedPaise = rupeesToPaise(v.quotedRupees, "quotedRupees");
+  if (quotedPaise === 0) throw new QuoteValidationError("No grand total found on the document");
+  const depositRequiredPaise = v.depositRupees === undefined || v.depositRupees === null ? undefined : rupeesToPaise(v.depositRupees, "depositRupees");
+  if (depositRequiredPaise !== undefined && depositRequiredPaise > quotedPaise) throw new QuoteValidationError("Deposit is larger than the quoted total");
+  if (v.depositDueInDays !== undefined && (!Number.isInteger(v.depositDueInDays) || v.depositDueInDays < 0 || v.depositDueInDays > 730))
+    throw new QuoteValidationError("depositDueInDays is out of range");
+  // Dates are computed here, never by the model: a printed date is kept only if it is a real calendar date.
+  const dueAt = v.dueAt && realDate(v.dueAt) ? v.dueAt : v.depositDueInDays !== undefined ? addDays(today, v.depositDueInDays) : undefined;
+  const uncertain = (v.uncertain ?? []).map(x => String(x).slice(0, 40)).slice(0, 10);
+  const notes = (v.notes ?? "").slice(0, 1000);
   return ScannedQuote.parse({
-    vendorName: v.vendorName.trim(), category: v.category, itemLabel: v.itemLabel.trim(), quotedPaise: r2p(v.quotedRupees) ?? 0,
-    depositRequiredPaise: r2p(v.depositRupees), dueAt, subEvent: v.subEvent || undefined,
-    notes: v.notes ?? "", redFlags: v.redFlags, summary: v.summary,
+    vendorName, category: v.category, itemLabel, quotedPaise,
+    depositRequiredPaise, dueAt, subEvent: v.subEvent || undefined,
+    notes: uncertain.length ? `${notes}${notes ? " " : ""}[Unclear on the document: ${uncertain.join(", ")}]` : notes,
+    redFlags: v.redFlags.map(r => r.slice(0, 200)).slice(0, 12), summary: v.summary.slice(0, 300),
+    ...(uncertain.length ? { uncertain } : {}),
   });
 }
 
@@ -176,6 +214,6 @@ export function scanToActions(q: ScannedQuote, plan: AgentState, today: string, 
   const b = actions.find(a => a.kind === "batch");
   const quoteRow = b?.kind === "batch" ? b.diff.rows.find(r => r.kind === "quote") : undefined;
   const reply = !out.response.ok ? `I read the quote but couldn't stage it: ${String(out.response.reason)}`
-    : `${q.summary} ${quoteRow?.note ? `It ${quoteRow.note.replace(/^⚠\s*/, "")}. ` : ""}${q.redFlags.length ? `${q.redFlags.length} contract red flag${q.redFlags.length > 1 ? "s" : ""} to review before you approve.` : "No risky clauses spotted."}`;
+    : `${q.summary} ${q.uncertain?.length ? `Double-check ${q.uncertain.join(", ")}: the document was unclear there. ` : ""}${quoteRow?.note ? `It ${quoteRow.note.replace(/^⚠\s*/, "")}. ` : ""}${q.redFlags.length ? `${q.redFlags.length} contract red flag${q.redFlags.length > 1 ? "s" : ""} to review before you approve.` : "No risky clauses spotted."}`;
   return { batch, actions, reply };
 }

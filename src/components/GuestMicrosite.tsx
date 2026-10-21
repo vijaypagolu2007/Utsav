@@ -98,7 +98,8 @@ function Wishlist({ plan, commit, actingGuestId, highlight }: Props) {
 function CommunitySignup({ plan, commit }: Props) {
   const ext = plan.event.ext;
   const [name, setName] = useState("");
-  const [sub, setSub] = useState(plan.subEvents.find(s => s.isMain)?.slug ?? plan.subEvents[0]?.slug ?? "");
+  const pub = plan.subEvents.filter(s => s.visibility === "public");
+  const [sub, setSub] = useState(pub.find(s => s.isMain)?.slug ?? pub[0]?.slug ?? "");
   const [shift, setShift] = useState("Morning");
   const [org, setOrg] = useState("");
   const [tier, setTier] = useState<"title" | "gold" | "silver" | "in_kind">("silver");
@@ -113,7 +114,7 @@ function CommunitySignup({ plan, commit }: Props) {
         <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs" />
         <div className="flex gap-2">
           <select value={sub} onChange={e => setSub(e.target.value)} className="min-w-0 flex-1 rounded-md border border-slate-300 px-1 py-1 text-xs">
-            {plan.subEvents.map(s => <option key={s.id} value={s.slug}>{s.name}</option>)}
+            {plan.subEvents.filter(s => s.visibility === "public").map(s => <option key={s.id} value={s.slug}>{s.name}</option>)}
           </select>
           <select value={shift} onChange={e => setShift(e.target.value)} className="rounded-md border border-slate-300 px-1 py-1 text-xs">
             {["Morning", "Afternoon", "Evening", "Setup crew", "Cleanup crew"].map(x => <option key={x}>{x}</option>)}

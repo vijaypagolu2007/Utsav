@@ -5,3 +5,9 @@ out
 .env
 next-env.d.ts
 *.tsbuildinfo
+
+# local shared-storage files (dev / E2E only)
+.data*/
+# Playwright
+test-results/
+playwright-report/

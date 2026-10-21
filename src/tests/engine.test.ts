@@ -594,8 +594,61 @@ describe("Gemini retry", () => {
       await assert.rejects(withGeminiRetry(async () => { calls++; throw new Error('{"error":{"code":404}}'); }, { delaysMs: [1, 1] }));
       assert.equal(calls, 1);
       assert.equal(isTransientGeminiError(new Error("This model is currently experiencing high demand")), true);
+      assert.equal(isTransientGeminiError(new Error('{"error":{"code":504,"message":"Deadline expired before operation could complete.","status":"DEADLINE_EXCEEDED"}}')), true);
     } finally {
       if (prev === undefined) delete process.env.GEMINI_FALLBACK_MODELS; else process.env.GEMINI_FALLBACK_MODELS = prev;
     }
+  });
+});
+
+describe("Gemini model selection", () => {
+  test("defaults to gemini-3.5-flash-lite; GEMINI_MODEL and GEMINI_FALLBACK_MODELS still override", async () => {
+    const { DEFAULT_GEMINI_MODEL, geminiModel, geminiModels } = await import("../gemini-model");
+    const prev = { m: process.env.GEMINI_MODEL, f: process.env.GEMINI_FALLBACK_MODELS };
+    try {
+      delete process.env.GEMINI_MODEL; delete process.env.GEMINI_FALLBACK_MODELS;
+      assert.equal(DEFAULT_GEMINI_MODEL, "gemini-3.5-flash-lite");
+      assert.equal(geminiModel(), "gemini-3.5-flash-lite");
+      assert.deepEqual(geminiModels(), ["gemini-3.5-flash-lite"]);
+      process.env.GEMINI_MODEL = "  "; // blank override falls back to the default
+      assert.equal(geminiModel(), "gemini-3.5-flash-lite");
+      process.env.GEMINI_MODEL = "gemini-3.8-flash";
+      process.env.GEMINI_FALLBACK_MODELS = "gemini-3.1-flash-lite, gemini-3.8-flash";
+      assert.deepEqual(geminiModels(), ["gemini-3.8-flash", "gemini-3.1-flash-lite"]);
+    } finally {
+      if (prev.m === undefined) delete process.env.GEMINI_MODEL; else process.env.GEMINI_MODEL = prev.m;
+      if (prev.f === undefined) delete process.env.GEMINI_FALLBACK_MODELS; else process.env.GEMINI_FALLBACK_MODELS = prev.f;
+    }
+  });
+});
+
+describe("Gemini latency settings", () => {
+  test("thinking level defaults to LOW, accepts the four levels, and 'default' sends nothing", async () => {
+    const { geminiThinkingLevel, geminiTimeoutMs } = await import("../gemini-model");
+    const prev = { t: process.env.GEMINI_THINKING_LEVEL, m: process.env.GEMINI_TIMEOUT_MS };
+    try {
+      delete process.env.GEMINI_THINKING_LEVEL;
+      assert.equal(geminiThinkingLevel(), "LOW");
+      process.env.GEMINI_THINKING_LEVEL = "minimal"; assert.equal(geminiThinkingLevel(), "MINIMAL");
+      process.env.GEMINI_THINKING_LEVEL = "HIGH"; assert.equal(geminiThinkingLevel(), "HIGH");
+      process.env.GEMINI_THINKING_LEVEL = "default"; assert.equal(geminiThinkingLevel(), undefined);
+      process.env.GEMINI_THINKING_LEVEL = "nonsense"; assert.equal(geminiThinkingLevel(), "LOW");
+      delete process.env.GEMINI_TIMEOUT_MS;
+      assert.equal(geminiTimeoutMs(30_000, 45_000), 30_000);
+      process.env.GEMINI_TIMEOUT_MS = "40000"; assert.equal(geminiTimeoutMs(30_000, 45_000), 40_000);
+      process.env.GEMINI_TIMEOUT_MS = "999999"; assert.equal(geminiTimeoutMs(30_000, 45_000), 45_000);
+      process.env.GEMINI_TIMEOUT_MS = "10"; assert.equal(geminiTimeoutMs(30_000, 45_000), 5_000);
+      process.env.GEMINI_TIMEOUT_MS = "abc"; assert.equal(geminiTimeoutMs(30_000, 45_000), 30_000);
+    } finally {
+      if (prev.t === undefined) delete process.env.GEMINI_THINKING_LEVEL; else process.env.GEMINI_THINKING_LEVEL = prev.t;
+      if (prev.m === undefined) delete process.env.GEMINI_TIMEOUT_MS; else process.env.GEMINI_TIMEOUT_MS = prev.m;
+    }
+  });
+
+  test("a 400 about thinking config is recognised so the call is retried without it", async () => {
+    const { isThinkingConfigRejected } = await import("../server/gemini-client");
+    assert.equal(isThinkingConfigRejected(new Error('{"error":{"code":400,"message":"Thinking level is not supported for this model."}}')), true);
+    assert.equal(isThinkingConfigRejected(new Error('{"error":{"code":400,"message":"Invalid argument"}}')), false);
+    assert.equal(isThinkingConfigRejected(new Error('{"error":{"code":503,"message":"thinking too hard"}}')), false);
   });
 });

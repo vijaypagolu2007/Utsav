@@ -2,6 +2,7 @@
 // It never mutates the live plan. It dry-runs batches and returns proposals; the client commits them through
 // applyBatch after the trust-tier check (Tier 0 auto, Tier 1 approve, Tier 2 human sends).
 import { z } from "zod";
+import { householdOf, visibleSubEventIds } from "./visibility";
 import type { AgentState } from "./schema";
 import { applyBatch, Batch, type BatchInput, type Diagnostics, type Role, rupees, taskDueDate } from "./commands";
 import { initializeEventPlan } from "./blueprint";
@@ -119,7 +120,7 @@ export function summarizePlan(st: AgentState, today: string): string {
   const lines: string[] = [];
   const wd = (d: string) => new Date(d + "T00:00:00Z").toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
   lines.push(`EVENT ${e.title} | ${e.eventType} | ${e.city} | budget ${rupees(e.totalBudgetPaise)} | window ${e.startDate}..${e.endDate} | guests ~${e.guestCount} | today ${today}`);
-  lines.push(`SUB-EVENTS (slug: date weekday, phase): ${st.subEvents.map(s => `${s.slug}: ${s.date} ${wd(s.date)}, ${s.phase}${s.isMain ? " MAIN" : ""}`).join(" | ")}`);
+  lines.push(`SUB-EVENTS (slug: date weekday, phase): ${st.subEvents.map(s => `${s.slug}: ${s.date} ${wd(s.date)}, ${s.phase}${s.isMain ? " MAIN" : ""}, ${s.visibility}`).join(" | ")}`);
   const cats = [...new Set(st.budgetItems.map(b => b.category))];
   lines.push("BUDGET by category (planned / committed / cuttable now):");
   for (const c of cats) {
@@ -150,13 +151,14 @@ export function summarizeForGuest(st: AgentState, actingGuestId: string | null):
   const wd = (d: string) => new Date(d + "T00:00:00Z").toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
   const hm = (m: number) => `${((Math.floor(m / 60) + 11) % 12) + 1}:${String(m % 60).padStart(2, "0")} ${m < 720 ? "AM" : "PM"}`;
   const lines = [`EVENT ${e.title} | ${e.eventType} | ${e.city} | ${e.startDate}..${e.endDate}`];
-  for (const s of [...st.subEvents].sort((a, b) => a.date.localeCompare(b.date) || a.startMin - b.startMin)) {
+  const visible = visibleSubEventIds(st, householdOf(st, actingGuestId));
+  for (const s of [...st.subEvents].filter(s => visible.has(s.id)).sort((a, b) => a.date.localeCompare(b.date) || a.startMin - b.startMin)) {
     const blocks = st.timeline.filter(b => b.subEventId === s.id).sort((a, b) => a.startMin - b.startMin).map(b => `${hm(b.startMin)} ${b.label}`);
     lines.push(`- ${s.slug}: ${s.name}, ${wd(s.date)} ${s.date} ${hm(s.startMin)}–${hm(s.endMin)}, venue ${s.venue || "tbc"}, dress code ${s.dressCode || "none"}${blocks.length ? `; schedule: ${blocks.join(", ")}` : ""}`);
   }
   for (const h of st.households) {
     const gs = st.guests.filter(g => g.householdId === h.id);
-    if (gs.length) lines.push(`HOUSEHOLD ${h.id} "${h.label}": ${gs.map(g => `${g.id} ${g.name} [${Object.entries(g.rsvp).map(([sid, v]) => `${st.subEvents.find(x => x.id === sid)?.slug ?? sid}=${v}`).join(" ")}]${g.diet.length ? ` diet ${g.diet.join("/")}` : ""}`).join("; ")}`);
+    if (gs.length) lines.push(`HOUSEHOLD ${h.id} "${h.label}": ${gs.map(g => `${g.id} ${g.name} [${Object.entries(g.rsvp).map(([sid, v]) => `${visible.has(sid) ? st.subEvents.find(x => x.id === sid)?.slug ?? sid : "private"}=${v}`).join(" ")}]${g.diet.length ? ` diet ${g.diet.join("/")}` : ""}`).join("; ")}`);
   }
   const x = e.ext;
   if (x.type === "birthday") lines.push(`WISHLIST: ${x.wishlist.map(w => `${w.id} ${w.item} (${w.claimedByGuestId ? "claimed" : "unclaimed"})`).join("; ")}`);

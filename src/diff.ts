@@ -60,6 +60,8 @@ export function computePlanDiff(before: EventPlan, after: EventPlan): PlanDiff {
     if (!b) continue;
     if (a.date !== b.date || a.startMin !== b.startMin)
       rows.push({ kind: "sub_event", id: a.id, label: `${a.name} date`, before: `${b.date} ${hhmm(b.startMin)}`, after: `${a.date} ${hhmm(a.startMin)}` });
+    if (a.visibility !== b.visibility)
+      rows.push({ kind: "sub_event", id: a.id, label: `${a.name} on guest link`, before: b.visibility, after: a.visibility });
   }
   let cascadedTasks = 0;
   for (const a of after.tasks) {

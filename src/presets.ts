@@ -20,11 +20,11 @@ export const royalWedding = AgentState.parse({
     ext: { type: "wedding", partners: ["Arjun", "Meera"], traditions: ["telugu", "hindu", "south-indian"], rsvpDeadline: "2027-02-10" },
   },
   subEvents: [
-    { id: "s1", name: "Haldi", slug: "haldi", date: "2027-03-11", startMin: 600, endMin: 780, venue: "Family home, Jubilee Hills", dressCode: "Yellow" },
-    { id: "s2", name: "Mehendi", slug: "mehendi", date: "2027-03-12", startMin: 960, endMin: 1200, venue: "Poolside lawn", dressCode: "Green & pink" },
-    { id: "s3", name: "Sangeet", slug: "sangeet", date: "2027-03-13", startMin: 1140, endMin: 1380, venue: "Grand ballroom", dressCode: "Indo-western" },
-    { id: "s4", name: "Muhurtham", slug: "muhurtham", date: "2027-03-14", startMin: 420, endMin: 720, isMain: true, phase: "main", venue: "N Convention", dressCode: "Silk" },
-    { id: "s5", name: "Reception", slug: "reception", date: "2027-03-15", startMin: 1140, endMin: 1380, phase: "post", venue: "N Convention", dressCode: "Formal" },
+    { id: "s1", visibility: "private", name: "Haldi", slug: "haldi", date: "2027-03-11", startMin: 600, endMin: 780, venue: "Family home, Jubilee Hills", dressCode: "Yellow" },
+    { id: "s2", visibility: "private", name: "Mehendi", slug: "mehendi", date: "2027-03-12", startMin: 960, endMin: 1200, venue: "Poolside lawn", dressCode: "Green & pink" },
+    { id: "s3", visibility: "public", name: "Sangeet", slug: "sangeet", date: "2027-03-13", startMin: 1140, endMin: 1380, venue: "Grand ballroom", dressCode: "Indo-western" },
+    { id: "s4", visibility: "public", name: "Muhurtham", slug: "muhurtham", date: "2027-03-14", startMin: 420, endMin: 720, isMain: true, phase: "main", venue: "N Convention", dressCode: "Silk" },
+    { id: "s5", visibility: "public", name: "Reception", slug: "reception", date: "2027-03-15", startMin: 1140, endMin: 1380, phase: "post", venue: "N Convention", dressCode: "Formal" },
   ],
   budgetItems: [
     { id: "b1", category: "decor", label: "Haldi marigold decor", subEventId: "s1", vendorId: "v2", plannedPaise: K(80), committedPaise: K(30) },
@@ -147,9 +147,9 @@ export const arcadeBirthday = AgentState.parse({
     },
   },
   subEvents: [
-    { id: "bs1", name: "Neon Setup", slug: "setup", date: "2026-12-12", startMin: 840, endMin: 1080, collectsRsvp: false, venue: "Level Up Lounge, Bandra" },
-    { id: "bs2", name: "Arcade Party", slug: "party", date: "2026-12-12", startMin: 1140, endMin: 1410, isMain: true, phase: "main", venue: "Level Up Lounge, Bandra", dressCode: "80s neon" },
-    { id: "bs3", name: "Recovery Brunch", slug: "brunch", date: "2026-12-13", startMin: 660, endMin: 810, phase: "post", venue: "Rohan's place" },
+    { id: "bs1", visibility: "private", name: "Neon Setup", slug: "setup", date: "2026-12-12", startMin: 840, endMin: 1080, collectsRsvp: false, venue: "Level Up Lounge, Bandra" },
+    { id: "bs2", visibility: "public", name: "Arcade Party", slug: "party", date: "2026-12-12", startMin: 1140, endMin: 1410, isMain: true, phase: "main", venue: "Level Up Lounge, Bandra", dressCode: "80s neon" },
+    { id: "bs3", visibility: "private", name: "Recovery Brunch", slug: "brunch", date: "2026-12-13", startMin: 660, endMin: 810, phase: "post", venue: "Rohan's place" },
   ],
   budgetItems: [
     { id: "bb1", category: "venue", label: "Level Up Lounge buyout", subEventId: "bs2", plannedPaise: K(45), committedPaise: K(20),
@@ -224,9 +224,9 @@ export const culturalFest = AgentState.parse({
     },
   },
   subEvents: [
-    { id: "cs1", name: "Volunteer Briefing", slug: "briefing", date: "2026-11-20", startMin: 1080, endMin: 1200, collectsRsvp: false, venue: "Community hall" },
-    { id: "cs2", name: "Main Stage & Food Court", slug: "main-stage", date: "2026-11-21", startMin: 600, endMin: 1320, isMain: true, phase: "main", venue: "Kondapur Grounds" },
-    { id: "cs3", name: "Cultural Night & Closing", slug: "cultural-night", date: "2026-11-22", startMin: 1020, endMin: 1320, phase: "post", venue: "Kondapur Grounds" },
+    { id: "cs1", visibility: "private", name: "Volunteer Briefing", slug: "briefing", date: "2026-11-20", startMin: 1080, endMin: 1200, collectsRsvp: false, venue: "Community hall" },
+    { id: "cs2", visibility: "public", name: "Main Stage & Food Court", slug: "main-stage", date: "2026-11-21", startMin: 600, endMin: 1320, isMain: true, phase: "main", venue: "Kondapur Grounds" },
+    { id: "cs3", visibility: "public", name: "Cultural Night & Closing", slug: "cultural-night", date: "2026-11-22", startMin: 1020, endMin: 1320, phase: "post", venue: "Kondapur Grounds" },
   ],
   budgetItems: [
     { id: "cb1", category: "venue", label: "Grounds rental (2 days)", subEventId: "cs2", plannedPaise: K(80), committedPaise: K(80),

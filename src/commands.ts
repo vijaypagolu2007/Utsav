@@ -98,10 +98,16 @@ export const CommunitySignup = z.object({
   tier: z.enum(["title", "gold", "silver", "in_kind"]).optional().describe("sponsor: tier they're interested in"),
 });
 
+export const SetSubEventVisibility = z.object({
+  op: z.literal("set_sub_event_visibility"),
+  subEvent: Ref,
+  visibility: z.enum(["public", "private"]).describe("public: shown on the shared guest link to anyone with it; private: only to invited households"),
+}).describe("Organizer only. Show or hide one sub-event on the public guest link. Does not change who may RSVP.");
+
 export const Command = z.discriminatedUnion("op", [
   AdjustBudget, MoveSubEvent, ShiftBlock, SetTaskStatus, RecordPayment, SetRsvp,
   SetItemLock, ClaimWishlistItem, SetPermitStatus, UpdateSponsor,
-  UpsertVendorQuote, SetGuestDiet, CommunitySignup,
+  UpsertVendorQuote, SetGuestDiet, CommunitySignup, SetSubEventVisibility,
 ]);
 export type Command = z.infer<typeof Command>;
 export type CommandInput = z.input<typeof Command>;
@@ -268,6 +274,13 @@ function apply(st: AgentState, c: Command, log: string[], role: Role = "organize
       if (role === "guest" && !(sid in g.rsvp)) throw new PlanError(`${g.name} isn't invited to ${findSubEvent(st, c.subEvent).name}; only the organiser can add invitations`);
       log.push(`${g.name} · ${c.subEvent}: ${c.answer}`);
       return { ...st, guests: st.guests.map(x => x.id === c.guestId ? { ...x, rsvp: { ...x.rsvp, [sid]: c.answer } } : x) };
+    }
+    case "set_sub_event_visibility": {
+      if (role === "guest") throw new PlanError("Only the organiser can change who sees a sub-event");
+      const s = findSubEvent(st, c.subEvent);
+      if (s.visibility === c.visibility) { log.push(`${s.name} is already ${c.visibility}`); return st; }
+      log.push(`${s.name}: ${c.visibility === "public" ? "shown on the public guest link" : "hidden from the public guest link (invited households still see it)"}`);
+      return { ...st, subEvents: st.subEvents.map(x => x.id === s.id ? { ...x, visibility: c.visibility } : x) };
     }
     case "set_item_lock": {
       const b = st.budgetItems.find(x => x.id === c.budgetItemId);

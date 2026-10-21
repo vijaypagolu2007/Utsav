@@ -2,6 +2,7 @@
 // parsers turn the flagship prompts into the very same tool calls Gemini would emit, so the demo never breaks.
 import type { AgentState, BudgetCategory } from "./schema";
 import { type CommandInput, addDays, rupees, weekdayOf, Weekday, findSubEvent } from "./commands";
+import { householdOf, visibleSubEventIds } from "./visibility";
 import type { InitializeEventPlanInput } from "./blueprint";
 import { executeAgentTool, type AgentAction, type ChatResponse } from "./agent";
 import { computePlanInsights } from "./insights";
@@ -389,9 +390,9 @@ const hm = (m: number) => `${((Math.floor(m / 60) + 11) % 12) + 1}:${String(m % 
 const longDate = (d: string) => new Date(d + "T00:00:00Z").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 const words = (s: string) => new Set(s.toLowerCase().replace(/[^a-z0-9]+/g, " ").split(" ").filter(w => w.length > 2));
 
-function mentionedSubEvents(st: AgentState, t: string) {
+function mentionedSubEvents(st: AgentState, t: string, visible?: Set<string>) {
   const lower = t.toLowerCase();
-  const scored = st.subEvents.map(s => {
+  const scored = st.subEvents.filter(s => !visible || visible.has(s.id)).map(s => {
     const full = lower.includes(s.name.toLowerCase()) || lower.includes(s.slug) || lower.includes(s.slug.replace(/-/g, " ")) ? 10 : 0;
     const partial = s.name.toLowerCase().split(/[^a-z]+/).filter(w => w.length > 4 && lower.includes(w)).length;
     return { s, score: full + partial };
@@ -412,6 +413,7 @@ export function runOfflineGuestAgent(st: AgentState, text: string, today: string
     return r.response as { ok: boolean; reason?: string; log?: string[] };
   };
   const me = actingGuestId ? st.guests.find(g => g.id === actingGuestId) ?? null : null;
+  const visible = visibleSubEventIds(st, householdOf(st, actingGuestId));
 
   // Organiser-only requests are sent to the reducer anyway, so the boundary (not the parser) says no.
   const organiserClauses = t.split(/\s*(?:,|;|\band\b)\s*/i).map(c => parseClause(st, c)).filter((c): c is CommandInput => c !== null && c.op !== "set_task_status");
@@ -448,7 +450,7 @@ export function runOfflineGuestAgent(st: AgentState, text: string, today: string
       const res = run(`${name} sponsor interest`, [{ op: "community_signup", kind: "sponsor", name, tier }]);
       return { mode: "offline", actions, reply: res.ok ? `Thank you! ${name} is noted as a ${tier.replace("_", "-")} sponsor prospect; the committee will reach out.` : `Couldn't add that: ${res.reason}` };
     }
-    const se = mentionedSubEvents(st, t)[0];
+    const se = mentionedSubEvents(st, t, visible)[0];
     const shift = t.match(/\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)\s*[-–to]+\s*\d{1,2}(?::\d{2})?\s*(?:am|pm))/i)?.[1];
     const res = run(`${name} volunteers`, [{ op: "community_signup", kind: "volunteer", name, ...(se ? { subEvent: se.slug } : {}), ...(shift ? { shift } : {}) }]);
     return { mode: "offline", actions, reply: res.ok ? `You're on the volunteer list, ${name}${se ? ` for ${se.name} (${longDate(se.date)})` : ""}. See you at the briefing!` : `Couldn't sign up: ${res.reason}` };
@@ -463,7 +465,7 @@ export function runOfflineGuestAgent(st: AgentState, text: string, today: string
     const named = st.guests.filter(g => lower.includes(g.name.toLowerCase()));
     const guests = hh ? st.guests.filter(g => g.householdId === hh.id) : named.length ? named : me ? [me] : [];
     if (!guests.length) return { mode: "offline", actions, reply: hhWord ? `I couldn't find a ${hhWord} household on the list.` : "Pick who you are in the RSVP card first, or name the household." };
-    let subs = mentionedSubEvents(st, t);
+    let subs = mentionedSubEvents(st, t, visible);
     if (!subs.length || /\ball\b|everything/i.test(t)) subs = st.subEvents.filter(s => guests.some(g => s.id in g.rsvp));
     const commands: CommandInput[] = guests.flatMap(g => subs.map(s => ({ op: "set_rsvp" as const, guestId: g.id, subEvent: s.slug, answer })));
     const meals = t.match(/(\d+)\s+([a-z-]+)\s+meals?/i);
@@ -481,12 +483,12 @@ export function runOfflineGuestAgent(st: AgentState, text: string, today: string
   }
 
   // Questions: time, venue, dress code, itinerary
-  const subs = mentionedSubEvents(st, t);
+  const subs = mentionedSubEvents(st, t, visible);
   if (subs.length) {
     return { mode: "offline", actions, reply: subs.map(s => `The ${s.name} is on ${longDate(s.date)}, ${hm(s.startMin)} to ${hm(s.endMin)}${s.venue ? ` at ${s.venue}` : ""}.${s.dressCode ? ` Dress code: ${s.dressCode}.` : ""}`).join(" ") };
   }
   if (/budget|cost|price|vendor|spend|paise|₹/i.test(t)) return { mode: "offline", actions, reply: "That's handled by the organisers, so I can't share it. I can help with timings, venues, dress codes and your RSVP." };
-  const list = [...st.subEvents].sort((a, b) => a.date.localeCompare(b.date) || a.startMin - b.startMin)
+  const list = st.subEvents.filter(s => visible.has(s.id)).sort((a, b) => a.date.localeCompare(b.date) || a.startMin - b.startMin)
     .map(s => `${s.name}: ${longDate(s.date)}, ${hm(s.startMin)}${s.venue ? `, ${s.venue}` : ""}`).join(" · ");
   return { mode: "offline", actions, reply: `Here's the itinerary: ${list}. Ask me about any event, or RSVP right here.` };
 }
