@@ -1,6 +1,7 @@
 // Gemini co-pilot route. The model only proposes tool calls; every tool runs through the deterministic
 // executor (dry-run reducer, blueprint allocator, insights). If Gemini is missing or fails, the offline
 // demo parser answers the flagship prompts with the very same tools.
+import { geminiModel } from "@/gemini-model";
 import { GoogleGenAI, type Content, type FunctionDeclaration, type Part } from "@google/genai";
 import { NextResponse } from "next/server";
 import { AgentState } from "@/schema";
@@ -26,7 +27,7 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 async function runGemini(apiKey: string, req: ChatRequest, st: AgentState, today: string, role: Role): Promise<ChatResponse> {
   const guest = role === "guest";
   const ai = new GoogleGenAI({ apiKey });
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  const model = geminiModel();
   const contents: Content[] = req.messages.slice(-12).map(m => ({ role: m.role === "user" ? "user" : "model", parts: [{ text: m.text }] }));
   const actions: AgentAction[] = [];
   let working = st;

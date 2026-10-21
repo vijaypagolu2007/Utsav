@@ -1,6 +1,7 @@
 // Live Gemini smoke test. Needs GEMINI_API_KEY in the environment or in .env.local.
 //   npm run smoke:gemini
 import { existsSync, readFileSync } from "node:fs";
+import { geminiModel } from "../src/gemini-model";
 
 if (!process.env.GEMINI_API_KEY && existsSync(".env.local")) {
   for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
@@ -10,13 +11,13 @@ if (!process.env.GEMINI_API_KEY && existsSync(".env.local")) {
 }
 const KEY = process.env.GEMINI_API_KEY ?? "";
 if (!KEY) { console.error("✗ GEMINI_API_KEY not set (env or .env.local)"); process.exit(1); }
-console.log(`key: ${KEY.length} chars, ${KEY.startsWith("AIza") ? "looks like a Gemini key" : "does NOT start with AIza (check .env.local)"}, model: ${process.env.GEMINI_MODEL || "gemini-2.5-flash"}`);
+console.log(`key: ${KEY.length} chars, ${/\s|["']/.test(KEY) ? "contains spaces or quotes (check .env.local)" : "format ok"}, model: ${geminiModel()}`);
 
 // Call Gemini once directly so a bad key / blocked network shows the real error instead of a silent fallback.
 async function ping() {
   const { GoogleGenAI } = await import("@google/genai");
   try {
-    const r = await new GoogleGenAI({ apiKey: KEY }).models.generateContent({ model: process.env.GEMINI_MODEL || "gemini-2.5-flash", contents: "Reply with OK" });
+    const r = await new GoogleGenAI({ apiKey: KEY }).models.generateContent({ model: geminiModel(), contents: "Reply with OK" });
     console.log(`✓ direct ping: "${(r.text ?? "").trim().slice(0, 40)}"`);
     return true;
   } catch (e) {
@@ -26,7 +27,7 @@ async function ping() {
 }
 
 async function main() {
-if (!(await ping())) { console.log("\nFix the error above first; the route checks would only fall back to Demo Mode."); process.exit(1); }
+if (!(await ping())) { console.log("\nFix the error above first; the route checks would only fall back to Demo Mode."); process.exitCode = 1; return; }
 const { royalWedding } = await import("../src/presets");
 const chat = (await import("../src/app/api/chat/route")).POST;
 const scan = (await import("../src/app/api/scan-quote/route")).POST;
@@ -68,6 +69,6 @@ const check = (name: string, ok: boolean, detail: string, warning?: string) => {
     `source=${r.source} vendor=${q.vendorName} quoted=${q.quotedPaise} deposit=${q.depositRequiredPaise} due=${q.dueAt} flags=${(q.redFlags ?? []).length}`, r.warning ?? (r.source === "gemini" ? undefined : r.reply));
 }
 console.log(failed ? `\n${failed} check(s) failed` : "\nAll live Gemini checks passed");
-process.exit(failed ? 1 : 0);
+process.exitCode = failed ? 1 : 0;
 }
 void main();

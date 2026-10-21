@@ -3,6 +3,7 @@
 //   • multipart file, or { dataUrl }     → Gemini Vision with structured JSON output (needs GEMINI_API_KEY)
 //   • a plain-text upload                → deterministic parser
 // Whatever reads the document, the result is one upsert_vendor_quote command, dry-run as a Tier-1 approval card.
+import { geminiModel } from "@/gemini-model";
 import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -22,7 +23,7 @@ async function extractWithGemini(apiKey: string, mimeType: string, base64: strin
   const ai = new GoogleGenAI({ apiKey });
   const lines = st.budgetItems.map(b => `${b.category}: ${b.label}`).join("\n");
   const res = await ai.models.generateContent({
-    model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+    model: geminiModel(),
     contents: [{ role: "user", parts: [
       { inlineData: { mimeType, data: base64 } },
       { text: `Extract this vendor quote / invoice / contract for "${st.event.title}". Today is ${today}.
