@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+}
+
+/* 3-second emerald pulse on anything the last change touched. Two identical keyframes let a new change restart it. */
+@keyframes pulse-a { 0%, 100% { box-shadow: 0 0 0 0 rgb(16 185 129 / 0); background-color: transparent; } 15%, 60% { box-shadow: 0 0 0 3px rgb(16 185 129 / 0.55); background-color: rgb(209 250 229 / 0.7); } }
+@keyframes pulse-b { 0%, 100% { box-shadow: 0 0 0 0 rgb(16 185 129 / 0); background-color: transparent; } 15%, 60% { box-shadow: 0 0 0 3px rgb(16 185 129 / 0.55); background-color: rgb(209 250 229 / 0.7); } }
+.hl-a { animation: pulse-a 3s ease-in-out 1; border-radius: 0.5rem; }
+.hl-b { animation: pulse-b 3s ease-in-out 1; border-radius: 0.5rem; }
+
+@keyframes toast-in { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
+.toast-in { animation: toast-in 180ms ease-out; }
+
+.scroll-thin { scrollbar-width: thin; }

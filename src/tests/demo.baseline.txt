@@ -1,0 +1,8 @@
+["decor: −₹20,000 across 2 item(s)","Haldi: 2027-03-11 → 2027-03-12"]
+Haldi marigold decor: ₹70000 | Sangeet stage: ₹140000 | Mandap: ₹200000
+2027-03-12 2027-02-26
+same input → same output: true
+overcut: "Can only cut ₹1,00,000 here: the rest is already committed"
+bad weekday window: "Haldi would land after the main event"
+overdue: ["Lunch"]
+schema keys: [ 'commands', 'summary' ]
