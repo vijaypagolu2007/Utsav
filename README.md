@@ -3,11 +3,13 @@
 Weddings, birthdays and community events on one split-screen canvas. Gemini **proposes**, a deterministic
 reducer **computes**, and you **approve**. The LLM never does budget math or date arithmetic.
 
+**Live:** https://utsav-event-planner-rho.vercel.app
+
 ```
 npm install
 cp .env.example .env.local   # add GEMINI_API_KEY (optional — without it the app runs in Demo Mode)
 npm run dev                  # http://localhost:3000
-npm run verify               # demo-output check + 111 unit + API tests + typecheck + lint (0 warnings) + production build
+npm run verify               # demo-output check + 116 unit + API tests + typecheck + lint (0 warnings) + production build
 ```
 
 ## Architecture
