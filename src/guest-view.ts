@@ -1,14 +1,14 @@
 // The public projection of an event: the ONLY shape a shared guest link ever receives. It is built with an
 // explicit allowlist (never by deleting fields from the plan), so a new private field added to the schema can't
 // leak by accident. No money, vendors, tasks, sponsors, permits, phone numbers, invite codes or other households.
-import type { AgentState } from "./schema";
+import { SponsorTier, type AgentState, type RsvpStatus } from "./schema";
 import { visibleSubEventIds } from "./visibility";
 
 export type GuestViewSubEvent = {
   id: string; slug: string; name: string; date: string; startMin: number; endMin: number;
   venue: string; dressCode: string; isMain: boolean; collectsRsvp: boolean;
 };
-export type GuestViewMember = { id: string; name: string; diet: string[]; rsvp: Record<string, "invited" | "yes" | "no" | "maybe"> };
+export type GuestViewMember = { id: string; name: string; diet: string[]; rsvp: Record<string, RsvpStatus> };
 export type GuestView = {
   eventId: string;
   version: number;
@@ -48,6 +48,6 @@ export function toGuestView(plan: AgentState, eventId: string, version: number, 
       id: w.id, item: w.item, priority: w.priority, claimed: w.claimedByGuestId !== null,
       claimedByYourHousehold: w.claimedByGuestId !== null && memberIds.has(w.claimedByGuestId),
     })) : null,
-    community: x.type === "community" ? { volunteersSignedUp: x.volunteerSignups.length, sponsorTiers: ["title", "gold", "silver", "in_kind"] } : null,
+    community: x.type === "community" ? { volunteersSignedUp: x.volunteerSignups.length, sponsorTiers: [...SponsorTier.options] } : null,
   };
 }

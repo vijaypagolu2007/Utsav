@@ -1,7 +1,7 @@
 // One command language and one pure reducer. Gemini function calls and CopilotKit actions
 // both reach the state only through applyBatch(), so the same command always yields the same state.
 import { z } from "zod";
-import { AgentState, BudgetItem, IsoDate, MinuteOfDay, Money } from "./schema";
+import { AgentState, BudgetItem, IsoDate, MinuteOfDay, Money, PermitStatus, RsvpStatus, SponsorStatus, SponsorTier, TaskStatus } from "./schema";
 
 const Ref = z.string().min(1).describe("An id, or a sub-event slug/name such as 'haldi'");
 export const Weekday = z.enum(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]);
@@ -31,7 +31,7 @@ export const ShiftBlock = z.object({
 
 export const SetTaskStatus = z.object({
   op: z.literal("set_task_status"),
-  taskId: z.string(), status: z.enum(["todo", "doing", "done", "blocked"]),
+  taskId: z.string(), status: TaskStatus,
 });
 
 export const RecordPayment = z.object({
@@ -41,7 +41,7 @@ export const RecordPayment = z.object({
 
 export const SetRsvp = z.object({
   op: z.literal("set_rsvp"),
-  guestId: z.string(), subEvent: Ref, answer: z.enum(["invited", "yes", "no", "maybe"]),
+  guestId: z.string(), subEvent: Ref, answer: RsvpStatus,
 });
 
 export const SetItemLock = z.object({
@@ -56,14 +56,14 @@ export const ClaimWishlistItem = z.object({
 
 export const SetPermitStatus = z.object({
   op: z.literal("set_permit_status"),
-  permitId: z.string(), status: z.enum(["not_started", "applied", "approved", "rejected"]),
+  permitId: z.string(), status: PermitStatus,
   referenceNo: z.string().optional(),
 });
 
 export const UpdateSponsor = z.object({
   op: z.literal("update_sponsor"),
   sponsorId: z.string(),
-  status: z.enum(["prospect", "pitched", "committed", "paid", "declined"]).optional(),
+  status: SponsorStatus.optional(),
   receivedPaise: Money.optional().describe("Total received so far, in paise (not a delta)"),
 });
 
@@ -95,7 +95,7 @@ export const CommunitySignup = z.object({
   name: z.string().min(1),
   subEvent: Ref.optional().describe("volunteer: the sub-event the shift is for"),
   shift: z.string().optional().describe("volunteer: e.g. 'Gate 10 AM–1 PM'"),
-  tier: z.enum(["title", "gold", "silver", "in_kind"]).optional().describe("sponsor: tier they're interested in"),
+  tier: SponsorTier.optional().describe("sponsor: tier they're interested in"),
 });
 
 export const SetSubEventVisibility = z.object({

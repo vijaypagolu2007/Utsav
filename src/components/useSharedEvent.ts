@@ -5,7 +5,7 @@
 // is merged in (and shown on the canvas) instead of being overwritten.
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentState } from "@/schema";
-import type { EventType } from "@/persistence";
+import type { TemplateId } from "@/config/event-templates";
 import { rebaseGuestFields } from "@/sync";
 
 export const SHARE_KEY = "utsav_share_v1";
@@ -13,22 +13,22 @@ export type Invite = { householdId: string; label: string; token: string };
 export type ShareInfo = { eventId: string; organizerToken: string; version: number; invites: Invite[] };
 export type ShareStatus = { state: "idle" | "publishing" | "syncing" | "synced" | "error" | "unconfigured"; message?: string; at?: number };
 
-function loadShares(): Partial<Record<EventType, ShareInfo>> {
-  try { return JSON.parse(window.localStorage.getItem(SHARE_KEY) ?? "{}") as Partial<Record<EventType, ShareInfo>>; } catch { return {}; }
+function loadShares(): Partial<Record<TemplateId, ShareInfo>> {
+  try { return JSON.parse(window.localStorage.getItem(SHARE_KEY) ?? "{}") as Partial<Record<TemplateId, ShareInfo>>; } catch { return {}; }
 }
-function saveShares(s: Partial<Record<EventType, ShareInfo>>) {
+function saveShares(s: Partial<Record<TemplateId, ShareInfo>>) {
   try { window.localStorage.setItem(SHARE_KEY, JSON.stringify(s)); } catch { /* storage full or disabled */ }
 }
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-/** The plan both sides last agreed on, per event type: the base of the three-way merge. Local-only. */
+/** The plan both sides last agreed on, per template slot: the base of the three-way merge. Local-only. */
 const BASE_KEY = "utsav_share_base_v1";
-function loadBase(t: EventType): AgentState | null {
-  try { return (JSON.parse(window.localStorage.getItem(BASE_KEY) ?? "{}") as Partial<Record<EventType, AgentState>>)[t] ?? null; } catch { return null; }
+function loadBase(t: TemplateId): AgentState | null {
+  try { return (JSON.parse(window.localStorage.getItem(BASE_KEY) ?? "{}") as Partial<Record<TemplateId, AgentState>>)[t] ?? null; } catch { return null; }
 }
-function saveBase(t: EventType, plan: AgentState | null) {
+function saveBase(t: TemplateId, plan: AgentState | null) {
   try {
-    const all = JSON.parse(window.localStorage.getItem(BASE_KEY) ?? "{}") as Partial<Record<EventType, AgentState>>;
+    const all = JSON.parse(window.localStorage.getItem(BASE_KEY) ?? "{}") as Partial<Record<TemplateId, AgentState>>;
     if (plan) all[t] = plan; else delete all[t];
     window.localStorage.setItem(BASE_KEY, JSON.stringify(all));
   } catch { /* storage full or disabled: the merge falls back to two-way */ }
@@ -45,13 +45,13 @@ type SyncDeps = {
   getPlan: () => AgentState;
   onMerge: (merged: AgentState) => void;
   setStatus: (s: ShareStatus) => void;
-  update: (t: EventType, s: ShareInfo | null) => void;
+  update: (t: TemplateId, s: ShareInfo | null) => void;
 };
-const inFlight = new Set<EventType>();
-const rerun = new Set<EventType>();
+const inFlight = new Set<TemplateId>();
+const rerun = new Set<TemplateId>();
 
 /** GET → rebase guest fields → PUT with baseVersion; retries on 409. One run per event type at a time. */
-async function reconcile(t: EventType, info: ShareInfo, d: SyncDeps): Promise<void> {
+async function reconcile(t: TemplateId, info: ShareInfo, d: SyncDeps): Promise<void> {
   if (inFlight.has(t)) { rerun.add(t); return; }
   inFlight.add(t);
   d.setStatus({ state: "syncing" });
@@ -90,15 +90,15 @@ async function reconcile(t: EventType, info: ShareInfo, d: SyncDeps): Promise<vo
   }
 }
 
-export function useSharedEvent(type: EventType, plan: AgentState, onMerge: (merged: AgentState) => void) {
-  const [shares, setShares] = useState<Partial<Record<EventType, ShareInfo>>>(() => loadShares());
+export function useSharedEvent(type: TemplateId, plan: AgentState, onMerge: (merged: AgentState) => void) {
+  const [shares, setShares] = useState<Partial<Record<TemplateId, ShareInfo>>>(() => loadShares());
   const [status, setStatus] = useState<ShareStatus>({ state: "idle" });
   const share = shares[type] ?? null;
   const planRef = useRef(plan);
   const onMergeRef = useRef(onMerge);
   useEffect(() => { planRef.current = plan; onMergeRef.current = onMerge; });
 
-  const update = useCallback((t: EventType, s: ShareInfo | null) => {
+  const update = useCallback((t: TemplateId, s: ShareInfo | null) => {
     setShares(prev => {
       const next = { ...prev };
       if (s) next[t] = s; else delete next[t];

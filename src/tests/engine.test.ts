@@ -8,7 +8,8 @@ import { computePlanInsights } from "../insights";
 import { computePlanDiff } from "../diff";
 import { batchTier } from "../trust";
 import { Batch } from "../commands";
-import { royalWedding, arcadeBirthday, culturalFest, PRESETS } from "../presets";
+import { royalWedding, arcadeBirthday, culturalFest } from "../presets";
+import { TEMPLATES } from "../config/event-templates";
 import { blueprintFromPrompt, parseAmountPaise, runOfflineAgent } from "../offline";
 import { functionDeclarations } from "../gemini-tools";
 import { SAMPLE_QUOTES, parseQuoteText, sampleQuote, scanToActions, visionToScanned } from "../quote-scanner";
@@ -195,10 +196,10 @@ describe("polymorphic event.ext", () => {
     assert.equal(applyBatch(culturalFest, { summary: "x", commands: [{ op: "update_sponsor", sponsorId: "sp2", receivedPaise: 99_00_000_00 }] }).ok, false);
   });
   test("all presets are valid and inside budget", () => {
-    for (const p of PRESETS) {
-      assert.deepEqual(checkInvariants(p.plan), [], p.label);
-      assert.ok(plannedTotal(p.plan) <= p.plan.event.totalBudgetPaise, p.label);
-      assert.equal(p.plan.event.ext.type, p.plan.event.eventType);
+    for (const t of TEMPLATES) {
+      assert.deepEqual(checkInvariants(t.seed), [], t.id);
+      assert.ok(plannedTotal(t.seed) <= t.seed.event.totalBudgetPaise, t.id);
+      assert.equal(t.seed.event.ext.type, t.seed.event.eventType);
     }
   });
 });
@@ -424,7 +425,7 @@ describe("quote scanner", () => {
   test("each sample hits its target line with the exact envelope breach", () => {
     const want: [string, number][] = [["b8", 35_000_00], ["bb4", 6_000_00], ["cb3", 25_000_00]];
     for (const [i, s] of SAMPLE_QUOTES.entries()) {
-      const plan = PRESETS[i]!.plan;
+      const plan = TEMPLATES[i]!.seed; // frozen: also proves the reducer never mutates its input
       const b = scanToActions(sampleQuote(s.id, TODAY)!, plan, TODAY).actions.find(x => x.kind === "batch");
       assert.ok(b && b.kind === "batch", s.id);
       assert.equal(b.tier, 1);

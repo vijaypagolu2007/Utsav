@@ -1,4 +1,5 @@
-// Three rich demo plans, one per archetype, so judges can try wedding, birthday and community in one click.
+// Seed plans for the three built-in event templates (registered in config/event-templates.ts), one per archetype,
+// so judges can try wedding, birthday and community in one click.
 // Dates are fixed so the demo is reproducible; the app's "today" control can be moved to see flags change.
 import { AgentState } from "./schema";
 
@@ -263,9 +264,3 @@ export const culturalFest = AgentState.parse({
     { id: "ct8", subEventId: "cs3", label: "Closing ceremony & fireworks", startMin: 1230, endMin: 1290, anchored: true },
   ],
 });
-
-export const PRESETS = [
-  { key: "wedding", label: "Royal Wedding — ₹25L", plan: royalWedding },
-  { key: "birthday", label: "30th Arcade Birthday — ₹1.5L", plan: arcadeBirthday },
-  { key: "community", label: "Community Cultural Fest — ₹5L", plan: culturalFest },
-] as const;

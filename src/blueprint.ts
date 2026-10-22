@@ -2,11 +2,10 @@
 // The LLM never emits paise totals or computed dates. It gives relative weights and day offsets;
 // this module allocates the budget with the same largest-remainder rule as adjust_budget and resolves every date.
 import { z } from "zod";
-import { AgentState, BudgetItem, IsoDate, MinuteOfDay } from "./schema";
+import { AgentState, BudgetItem, EventType, IsoDate, MinuteOfDay, Priority, SponsorStatus, SponsorTier } from "./schema";
 import { addDays, allocateLargestRemainder, checkInvariants, PlanError, plannedTotal } from "./commands";
 
 const Category = BudgetItem.shape.category;
-const Priority = z.enum(["low", "med", "high"]);
 
 const BlueprintSubEvent = z.object({
   name: z.string().min(1).describe("e.g. 'Haldi', 'Cake & Games', 'Main Stage'"),
@@ -67,10 +66,10 @@ const BlueprintExt = z.discriminatedUnion("type", [
     expectedFootfall: z.number().int().nonnegative().default(0),
     volunteers: z.number().int().nonnegative().default(0),
     sponsors: z.array(z.object({
-      name: z.string(), tier: z.enum(["title", "gold", "silver", "in_kind"]),
+      name: z.string(), tier: SponsorTier,
       pledgedRupees: z.number().int().nonnegative().default(0),
       deliverables: z.array(z.string()).default([]),
-      status: z.enum(["prospect", "pitched", "committed", "paid", "declined"]).default("prospect"),
+      status: SponsorStatus.default("prospect"),
     })).default([]),
     permits: z.array(z.object({
       authority: z.string(), kind: z.string(),
@@ -82,7 +81,7 @@ const BlueprintExt = z.discriminatedUnion("type", [
 
 export const InitializeEventPlan = z.object({
   title: z.string().min(1),
-  eventType: z.enum(["wedding", "birthday", "community"]),
+  eventType: EventType,
   city: z.string().default(""),
   startDate: IsoDate.describe("First day of the event window, YYYY-MM-DD"),
   totalBudgetRupees: z.number().int().positive().describe("Whole rupees. ₹25L = 2500000, ₹1.5L = 150000. The tool converts to paise"),

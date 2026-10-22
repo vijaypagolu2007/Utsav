@@ -9,7 +9,7 @@ reducer **computes**, and you **approve**. The LLM never does budget math or dat
 npm install
 cp .env.example .env.local   # add GEMINI_API_KEY (optional — without it the app runs in Demo Mode)
 npm run dev                  # http://localhost:3000
-npm run verify               # demo-output check + 116 unit + API tests + typecheck + lint (0 warnings) + production build
+npm run verify               # demo-output check + 158 unit + API + a11y tests + typecheck + lint (0 warnings) + production build
 ```
 
 ## Architecture
@@ -29,9 +29,10 @@ npm run verify               # demo-output check + 116 unit + API tests + typech
 | `src/quote-scanner.ts` | Vendor quote / contract scanner: 3 built-in sample documents, deterministic text parser, Gemini Vision extraction schema (rupees → paise in code), `scanToActions` → one Tier-1 `upsert_vendor_quote` card with red flags |
 | `src/app/api/scan-quote/route.ts` | `multipart/form-data`, JSON `imageBase64`+`mimeType` (or `dataUrl`), or `presetQuoteKey` (`wedding · birthday · community` or a sample id); Gemini Vision with JSON output when a key is set; returns the chat shape (`reply`, `actions`, `mode`) |
 | `src/export.ts` | `budgetToCsv` (RFC 4180: `ID,Category,Item,SubEvent,PlannedINR,QuotedINR,CommittedINR,PaidINR,CuttableSlackINR,Locked,Vendor` + TOTAL) and `runSheetToHtml` (print-styled day-of run sheet) |
-| `src/persistence.ts` | `localStorage["genai_event_planner_v1"]`: active archetype, planning date and undo/redo history per archetype, Zod-revalidated on load |
+| `src/persistence.ts` | `localStorage["genai_event_planner_v1"]`: active template, planning date and undo/redo history per template slot, Zod-revalidated on load |
 | `src/components/GuestMicrosite.tsx` | Guest / Committee view: hero, live itinerary, self-service RSVP + diets, wishlist claims, volunteer & sponsor sign-up |
-| `src/presets.ts` | Royal Wedding ₹25L · 30th Arcade Birthday ₹1.5L · Community Cultural Fest ₹5L |
+| `src/presets.ts` | Seed plans for the built-in templates: Royal Wedding ₹25L · 30th Arcade Birthday ₹1.5L · Community Cultural Fest ₹5L |
+| `src/config/*` · `src/kpis.ts` | Configuration layer: event templates, option lists, demo prompts, KPI definitions (see [Configuration](#configuration)) |
 | `src/app/api/chat/route.ts` | Thin route → `src/server/chat-handler.ts`: Zod-validated request, bounded multi-step function calling, classified provider failures with labelled offline fallback |
 | `src/server/gemini-client.ts` | The only module that touches the Gemini SDK; injectable `GenerateFn` (mocked in tests), timeouts, error classification |
 | `src/server/scan-handler.ts` | Quote upload validation (size caps, magic-byte sniffing, strict base64), Vision call, `rupeesToPaise` checks |
@@ -39,8 +40,9 @@ npm run verify               # demo-output check + 116 unit + API tests + typech
 | `src/guest-view.ts` · `src/sync.ts` | Allowlisted public projection; organizer-side rebase of guest-owned fields after a version conflict |
 | `src/app/guest/[eventId]` · `PublicGuestPage.tsx` | Shared guest page (works on any device) |
 | `src/components/*` | Command bar (KPIs, undo/redo scrubber, red flags, time-travel date), budget ledger, lane timeline, derived-date task queue, archetype module, chat with diff/approval/draft cards |
+| `CopilotDrawer.tsx` · `src/budget-a11y.ts` | Floating launcher + modal drawer around the chat; screen-reader values for the budget meters and sponsor progress bars |
 
-## Judge demo prompts (chips in the sidebar)
+## Judge demo prompts (chips in the AI Co-Pilot drawer)
 1. *Cut ₹20k from decor and move the Haldi to Friday* → ₹10,000 off Haldi decor and Sangeet stage (Mandap locked, Mehendi fully committed), Haldi Thu→Fri, 2 task due dates cascade. Tier 1 diff card.
 2. *Cut ₹1.5L from decor* → rolled back: only ₹1,00,000 unlocked slack. Counter-offer card for ₹1,00,000.
 3. *Move the Haldi to Monday* → rejected (pre-event after the Muhurtham); valid dates listed; counter-offer Sat.
@@ -92,6 +94,45 @@ npm run verify               # demo-output check + 116 unit + API tests + typech
 - **Defaults and existing data.** New sub-events, including those created by `initialize_event_plan`, default to **private** unless the organizer explicitly asks for public. Plans saved before this field existed (localStorage, or a shared-event record on the server) load through Zod with every sub-event defaulted to **private**. Nothing is deleted: the organizer still sees everything. The public link shows an "itinerary not published yet" notice until something is marked public, and the Guest links dialog shows how many sub-events are public. This fails closed on purpose. The demo presets set visibility explicitly (for example, Haldi and Mehendi are private, and Sangeet, Muhurtham and Reception are public).
 - Visibility is organizer-owned, so the three-way sync merge always keeps the organizer's value.
 
+## Configuration
+
+Templates, option lists, demo prompts and KPI tiles are data, validated with Zod when the app loads (so a bad entry fails `npm test` and `next build`, never a user's session). Configuration only chooses among existing components and text. It never contains code, never decides permissions, and never bypasses the reducer.
+
+| What | Where | Validated by | Consumed by |
+|---|---|---|---|
+| Event templates (seed plan + presentation) | `src/config/event-templates.ts`, seeds in `src/presets.ts` | `EventTemplate` / `TemplateRegistry` (strict; seed is a full `AgentState`) | event switcher, `persistence.ts`, `ArchetypeCard`, `GuestMicrosite`, `GET /api/event-templates` |
+| Status vocabularies (RSVP, task, priority, sponsor tier/status, permit) | Zod enums in `src/schema.ts` | the schema itself | commands, blueprint, guest projection, option lists |
+| Option lists and labels (diets, RSVP answers, task columns, sponsor/permit selects, volunteer shifts) | `src/config/planner-options.ts` | label maps typed as `Record<enum, string>` (a missing label is a type error) | all selects, chip groups and toggles |
+| Demo prompts | `src/config/demo-prompts.ts` | `DemoPrompt` (strict: text only) | Co-Pilot chips, filtered by audience and event type |
+| KPI tiles | `src/config/kpis.ts` (label, description, audiences, event types, order) | `KpiDefinitionList` (money tiles can't be guest-visible) | `CommandBar`; values from `src/kpis.ts` |
+
+**Templates and slots.** Each template owns one slot in local storage. The three built-in ids (`wedding`, `birthday`, `community`) are the keys plans have always been saved under, so existing saved plans load with no migration. A saved slot whose template no longer exists is kept as-is and written back, never dropped. Picking a template deep-copies its frozen seed (`instantiateTemplate`), so no two plans share objects with each other or with the registry. Entity ids inside a plan (`s1`, `b1`, `g1`…) stay as authored, because they are plan-scoped and the offline brain and tests depend on them. An AI blueprint of another event type lands in that type's first template.
+
+**Generic layout.** A template's `layout` lists sections by id in one or two columns (`main-aside` or `two-up`), plus a heading that may use `{tokens}`. `guest` sets the microsite kicker, tagline and side/footer cards. The section ids, and the event types whose data each needs, are in `ORGANIZER_SECTIONS` and `GUEST_SECTIONS`. Their components are the `SECTIONS` map in `ArchetypeCard.tsx` and `GUEST_SECTIONS` in `GuestMicrosite.tsx`. `rsvp-matrix`, `diet-summary` and `guest-rsvp` work for any event type. Validation rejects a section that needs another event type's data. The shared guest page (`/guest/:id`) is not template-driven: what it shows is decided by the server's allowlisted projection.
+
+**KPIs.** Definitions are serializable data. Each id maps to one pure function in `KPI_CALCULATORS` (`src/kpis.ts`), sharing a context computed once per render. The map is keyed by the id union, so a tile without a calculation doesn't compile.
+
+**Unchanged.** The reducer (`applyBatch`), trust tiers, approval cards, guest permissions, visibility filtering, the Gemini loop and Demo Mode don't read configuration. A prompt chip sends its text exactly as if typed.
+
+### Adding a template
+1. Write a seed plan (any valid `AgentState`) in `src/presets.ts`, for example a smaller wedding:
+   ```ts
+   export const intimateWedding = AgentState.parse({
+     event: { id: "ev-intimate", title: "Riya & Kabir", eventType: "wedding", city: "Goa", totalBudgetPaise: 8_00_000_00,
+       startDate: "2027-01-22", endDate: "2027-01-23", ext: { type: "wedding", partners: ["Riya", "Kabir"] } },
+     subEvents: [{ id: "s1", name: "Beach ceremony", slug: "ceremony", date: "2027-01-23", startMin: 960, endMin: 1140, isMain: true, phase: "main", visibility: "public" }],
+     budgetItems: [{ id: "b1", category: "venue", label: "Beach lawn", plannedPaise: 3_00_000_00 }],
+   });
+   ```
+2. Add one entry to `DEFINITIONS` in `src/config/event-templates.ts`:
+   ```ts
+   { id: "intimate-wedding", name: "Intimate Beach Wedding", eventType: "wedding", accent: "rose",
+     description: "Two-day beach wedding for 60 guests.", seed: intimateWedding,
+     layout: { heading: "Wedding · {partners}", icon: "heart", arrangement: "main-aside", columns: [["rsvp-matrix"], ["diet-summary"]] },
+     guest: { kicker: "You're invited to celebrate", tagline: "[{partners}]", aside: ["guest-rsvp"], footer: [] } },
+   ```
+3. Run `npm test`. The registry test lists the expected template ids, so update it alongside. The switcher, the template API and the persistence slot pick it up automatically.
+
 ## API
 
 | Route | Auth | Body | Returns |
@@ -101,6 +142,7 @@ npm run verify               # demo-output check + 116 unit + API tests + typech
 | `POST /api/events` | none, rate-limited | `{ plan }` | `201 { eventId, organizerToken, version, invites[] }` (token shown once) |
 | `GET /api/events/:id` | `Authorization: Bearer <organizerToken>` | | `{ version, plan, invites[] }` |
 | `PUT /api/events/:id` | organizer bearer | `{ plan, baseVersion }` | `200 { version }` or `409 { current }` |
+| `GET /api/event-templates` | none (read-only, same for everyone) | | `{ templates: [{ id, name, label, description, eventType, city, currency, totalBudgetPaise, startDate, endDate, subEventCount }] }` |
 | `GET /api/events/:id/public` | optional `X-Guest-Token` | | public projection |
 | `POST /api/events/:id/guest` | `X-Guest-Token` (sign-ups work without) | `{ commands ≤10 }`, only `set_rsvp`, `set_guest_diet`, `claim_wishlist_item`, `community_signup` | `{ log, view }` |
 
@@ -142,15 +184,18 @@ npm run verify               # demo-output check + 116 unit + API tests + typech
 
 | Command | What it runs |
 |---|---|
-| `npm test` | Node test runner: engine tests (`src/tests/engine.test.ts`) + API/security/concurrency tests with mocked Gemini and an in-memory store (`src/tests/server.test.ts`) |
+| `npm test` | Node test runner: engine tests (`src/tests/engine.test.ts`), API/security/concurrency tests with mocked Gemini and an in-memory store (`src/tests/server.test.ts`), accessibility helpers (`src/tests/a11y.test.ts`) and the configuration layer: templates, template API, options, prompts, server-rendered layouts, KPIs (`src/tests/config.test.ts`) |
 | `npm run demo:check` | `src/demo.ts` output vs. `src/tests/demo.baseline.txt` (byte-identical) |
 | `npm run typecheck` · `npm run lint` · `npm run build` | `tsc --noEmit` · `eslint --max-warnings=0` · `next build` |
 | `npm run verify` | all of the above, in that order |
-| `npm run e2e:install` then `npm run test:e2e` | Playwright smoke suite (`e2e/smoke.spec.ts`) against a production build with no Gemini key and the file store |
+| `npm run e2e:install` then `npm run test:e2e` | Playwright: `e2e/smoke.spec.ts` (core workflows), `e2e/config.spec.ts` (template API, switcher, configured sections and prompts) and `e2e/a11y.spec.ts` (Co-Pilot drawer, focus, meters, axe-core WCAG 2.2 A/AA scan, 320/375/768/1280 px layouts) against a production build with no Gemini key and the file store |
 | `npm run smoke:gemini` | Live check with your real key (see below) |
 
 ### Live Gemini smoke test
 With `GEMINI_API_KEY` in `.env.local`, `npm run smoke:gemini` pings Gemini directly, then calls the real routes: an organizer prompt runs multi-step function calling into a Tier-1 batch, an over-cut gets a counter-offer, a guest budget change is refused, and Gemini Vision reads `samples/deccan-royal-caterers-quote.png` as ₹1,85,000. It also checks that the scan stays a Tier-1 proposal with integer paise, and that a rejected key falls back safely without echoing it. Exit code 0 means PASS, 1 means FAIL, and 2 means BLOCKED (key, quota, or provider down). A BLOCKED run is not a pass. Checks are spaced 13 s apart (`SMOKE_GAP_MS`) to stay under the free tier's ~5 requests a minute; a check that falls back because of a rate limit, overload or timeout counts as BLOCKED rather than FAIL. One run uses about eight Gemini requests.
+
+## Accessibility
+Target: WCAG 2.2 AA. The AI Co-Pilot is a native modal `<dialog>` that opens from the floating launcher at the bottom right. It is closed by default. Escape, the close button or the backdrop closes it, and focus returns to whatever opened it. Closing never clears the transcript, the typed draft or pending approvals. Every control has a visible focus ring and an accessible name. Budget bars are meters with rupee `aria-valuetext`. Results are announced through polite live regions. Text colours are checked against Tailwind's palette in `src/tests/a11y.test.ts`, and `prefers-reduced-motion` turns off the slide, pulse and toast animations. Automated checks don't prove conformance. Screen-reader passes with NVDA, VoiceOver and TalkBack, and 200% zoom on real devices, are still manual.
 
 ## Deploy (Vercel)
 1. **Storage:** Vercel → Storage → Marketplace → *Upstash for Redis* → create a database and connect it to the project (this adds `KV_REST_API_URL` / `KV_REST_API_TOKEN`). No schema or migrations: each event is one Redis hash `utsav:event:<id>` with a 180-day TTL refreshed on every write; rate-limit counters are `utsav:rl:*` keys that expire on their own.

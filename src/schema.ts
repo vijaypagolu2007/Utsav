@@ -12,6 +12,17 @@ export const IsoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 export const MinuteOfDay = z.number().int().min(0).max(24 * 60);
 const Id = z.string().min(1);
 
+// ---------- Shared enums: the one definition of each status vocabulary ----------
+// Commands, the blueprint schema, guest projection and the UI option lists (src/config/planner-options.ts) all reuse these,
+// so a value can never be valid in one place and unknown in another. Persisted values are part of the storage format: never rename one.
+export const EventType = z.enum(["wedding", "birthday", "community"]);
+export const Priority = z.enum(["low", "med", "high"]);
+export const RsvpStatus = z.enum(["invited", "yes", "no", "maybe"]);
+export const TaskStatus = z.enum(["todo", "doing", "done", "blocked"]);
+export const SponsorTier = z.enum(["title", "gold", "silver", "in_kind"]);
+export const SponsorStatus = z.enum(["prospect", "pitched", "committed", "paid", "declined"]);
+export const PermitStatus = z.enum(["not_started", "applied", "approved", "rejected"]);
+
 // ---------- Event, with one extension block per event type ----------
 const WeddingExt = z.looseObject({
   type: z.literal("wedding"),
@@ -27,7 +38,7 @@ const BirthdayExt = z.looseObject({
   wishlist: z.array(z.looseObject({
     id: Id, item: z.string(), url: z.string().url().optional(),
     approxPaise: Money.optional(), claimedByGuestId: Id.nullable().default(null),
-    priority: z.enum(["low", "med", "high"]).default("med"),
+    priority: Priority.default("med"),
   })).default([]),
   activities: z.array(z.looseObject({
     id: Id, name: z.string(), ageRange: z.tuple([z.number(), z.number()]).optional(),
@@ -39,15 +50,15 @@ const CommunityExt = z.looseObject({
   organizer: z.string().default(""),
   expectedFootfall: z.number().int().nonnegative().default(0),
   sponsors: z.array(z.looseObject({
-    id: Id, name: z.string(), tier: z.enum(["title", "gold", "silver", "in_kind"]),
+    id: Id, name: z.string(), tier: SponsorTier,
     pledgedPaise: Money.default(0), receivedPaise: Money.default(0),
     deliverables: z.array(z.string()).default([]), // "logo on banner", "stall"
-    status: z.enum(["prospect", "pitched", "committed", "paid", "declined"]).default("prospect"),
+    status: SponsorStatus.default("prospect"),
   })).default([]),
   permits: z.array(z.looseObject({
     id: Id, authority: z.string(),            // "GHMC", "Police", "Fire NOC"
     kind: z.string(), applyBy: IsoDate.nullable().default(null),
-    status: z.enum(["not_started", "applied", "approved", "rejected"]).default("not_started"),
+    status: PermitStatus.default("not_started"),
     feePaise: Money.default(0), referenceNo: z.string().default(""),
   })).default([]),
   volunteers: z.number().int().nonnegative().default(0),
@@ -61,7 +72,7 @@ export const EventExt = z.discriminatedUnion("type", [WeddingExt, BirthdayExt, C
 export const Event = z.looseObject({
   id: Id,
   title: z.string(),
-  eventType: z.enum(["wedding", "birthday", "community"]),
+  eventType: EventType,
   city: z.string().default(""),
   currency: z.string().default("INR"),
   totalBudgetPaise: Money,
@@ -129,8 +140,8 @@ export const Task = z.looseObject({
   vendorId: Id.nullable().default(null),
   /** The due date is derived: (sub-event date, or the main event) + offsetDays. Moving a sub-event moves its tasks. */
   dueOffsetDays: z.number().int(),   // -30 means 30 days before
-  status: z.enum(["todo", "doing", "done", "blocked"]).default("todo"),
-  priority: z.enum(["low", "med", "high"]).default("med"),
+  status: TaskStatus.default("todo"),
+  priority: Priority.default("med"),
   column: z.string().default("todo"), // kanban lane
 });
 
@@ -156,7 +167,7 @@ export const Guest = z.looseObject({
   isPlusOne: z.boolean().default(false),
   diet: z.array(z.string()).default([]),   // "veg", "jain", "no-onion-garlic"
   /** Each guest's RSVP is per sub-event. A missing key means not invited to it. */
-  rsvp: z.record(Id, z.enum(["invited", "yes", "no", "maybe"])).default({}),
+  rsvp: z.record(Id, RsvpStatus).default({}),
 });
 
 export const AgentState = z.looseObject({
@@ -183,4 +194,11 @@ export type Household = z.infer<typeof Household>;
 export type Vendor = z.infer<typeof Vendor>;
 export type EventExt = z.infer<typeof EventExt>;
 export type BudgetCategory = BudgetItem["category"];
+export type EventType = z.infer<typeof EventType>;
+export type Priority = z.infer<typeof Priority>;
+export type RsvpStatus = z.infer<typeof RsvpStatus>;
+export type TaskStatus = z.infer<typeof TaskStatus>;
+export type SponsorTier = z.infer<typeof SponsorTier>;
+export type SponsorStatus = z.infer<typeof SponsorStatus>;
+export type PermitStatus = z.infer<typeof PermitStatus>;
 export const BUDGET_CATEGORIES = BudgetItem.shape.category.options;

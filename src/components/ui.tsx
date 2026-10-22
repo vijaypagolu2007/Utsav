@@ -4,15 +4,9 @@ import { daysBetween, weekdayOf } from "@/commands";
 import { formatMinute } from "@/diff";
 
 /** ₹ with Indian digit grouping: 15000000 paise → ₹1,50,000. */
-export const inr = (paise: number) => `${paise < 0 ? "−" : ""}₹${Math.round(Math.abs(paise) / 100).toLocaleString("en-IN")}`;
+export { inr } from "@/budget-a11y";
 /** Compact lakh/crore form for tight spots: ₹25L, ₹1.5L, ₹80K. */
-export function inrShort(paise: number) {
-  const r = Math.abs(paise) / 100, s = paise < 0 ? "−" : "";
-  if (r >= 1e7) return `${s}₹${+(r / 1e7).toFixed(2)}Cr`;
-  if (r >= 1e5) return `${s}₹${+(r / 1e5).toFixed(2)}L`;
-  if (r >= 1e3) return `${s}₹${+(r / 1e3).toFixed(1)}K`;
-  return `${s}₹${r}`;
-}
+export { inrShort } from "@/budget-a11y";
 export const hhmm = formatMinute;
 export const prettyDate = (d: string) => {
   const dt = new Date(d + "T00:00:00Z");
@@ -30,8 +24,8 @@ export function useHighlight(hl: { ids: Set<string>; key: number }) {
 export function Card({ title, icon, right, children, className = "" }: { title: string; icon?: ReactNode; right?: ReactNode; children: ReactNode; className?: string }) {
   return (
     <section className={`rounded-2xl border border-slate-200 bg-white shadow-sm ${className}`}>
-      <header className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-800">{icon}{title}</h2>
+      <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-b border-slate-100 px-4 py-3">
+        <h2 className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-800">{icon}{title}</h2>
         {right}
       </header>
       <div className="p-4">{children}</div>

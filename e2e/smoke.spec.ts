@@ -11,8 +11,19 @@ test.beforeEach(async ({ page }) => {
 test.afterEach(() => { expect(pageErrors, "uncaught client-side exceptions").toEqual([]); });
 
 const rupees = (s: string) => Number(s.replace(/[^\d]/g, ""));
-const kpi = (page: Page, name: string) => page.getByTestId(`kpi-${name}`).locator("div").nth(1);
+const kpi = (page: Page, name: string) => page.getByTestId(`kpi-${name}`).locator("dd").first();
+// The Co-Pilot lives in a modal drawer that is closed by default.
+async function openCopilot(page: Page) {
+  const drawer = page.getByTestId("copilot-drawer");
+  if (!(await drawer.isVisible())) await page.getByTestId("copilot-launcher").click();
+  await expect(drawer).toBeVisible();
+}
+async function closeCopilot(page: Page) {
+  if (await page.getByTestId("copilot-drawer").isVisible()) await page.keyboard.press("Escape");
+  await expect(page.getByTestId("copilot-drawer")).toBeHidden();
+}
 async function ask(page: Page, text: string) {
+  await openCopilot(page);
   await page.getByLabel("Chat message").fill(text);
   await page.getByRole("button", { name: "Send", exact: true }).click();
 }
@@ -48,6 +59,7 @@ test("over-cut is rolled back with a verified counter-offer and the plan unchang
 });
 
 test("quote scanner sample opens as a Tier-1 card with red flags", async ({ page }) => {
+  await openCopilot(page);
   await page.getByRole("button", { name: "Scan sample quote" }).click();
   const card = page.getByTestId("diff-card").last();
   await expect(card).toContainText("Contract red flags");
@@ -63,10 +75,11 @@ test("exports: CSV downloads, run sheet opens", async ({ page, context }) => {
 });
 
 test("Guest View hides organizer controls", async ({ page }) => {
-  await page.getByRole("radio", { name: /Guest View/ }).click();
+  await page.getByRole("button", { name: "Guest View" }).click();
+  await expect(page.getByRole("button", { name: "Guest View" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: /Export CSV/ })).toHaveCount(0);
   await expect(page.getByTestId("kpi-planned")).toHaveCount(0);
-  await expect(page.getByText("Guest Concierge")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open Guest Concierge" })).toBeVisible();
 });
 
 test("server refuses organizer mutations from a guest link", async ({ request }) => {
@@ -114,7 +127,7 @@ async function publishWedding(page: Page) {
   await expect(invite).toBeVisible();
   const url = await invite.inputValue();
   const share = await page.evaluate(() => (JSON.parse(localStorage.getItem("utsav_share_v1") ?? "{}") as Record<string, Share>).wedding);
-  await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Close", exact: true }).click();
   return { url, share };
 }
 
@@ -153,6 +166,7 @@ test("guest RSVP and an organizer budget edit made at the same time both survive
   await expect(card).toContainText("Tier 1");
   await card.getByRole("button", { name: "Approve & Commit" }).click();
   await expect(card).toContainText("Committed");
+  await closeCopilot(page);
   await page.getByTestId("open-guest-links").click();
   await page.getByRole("button", { name: "Sync now" }).click();
   await expect(page.getByTestId("share-sync-status")).toContainText("Synced");
@@ -173,7 +187,7 @@ test("private sub-events stay off the public link until the organizer marks them
   await page.getByTestId("publish-guest-links").click();
   await expect(page.getByTestId("visibility-summary")).toContainText("3 of 5 sub-events are public");
   const publicUrl = await page.getByTestId("public-guest-link").inputValue();
-  await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Close", exact: true }).click();
 
   const guestCtx = await browser.newContext();
   const guest = await guestCtx.newPage();

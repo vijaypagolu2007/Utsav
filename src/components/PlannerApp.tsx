@@ -1,15 +1,15 @@
 "use client";
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import type { AgentState } from "@/schema";
 import { applyBatch, type BatchInput, type BatchResult, type Role } from "@/commands";
 import { computePlanDiff } from "@/diff";
 import { computePlanInsights, todayIST } from "@/insights";
-import { PRESETS } from "@/presets";
 import { runOfflineAgent, runOfflineGuestAgent } from "@/offline";
 import type { AgentAction, ChatResponse } from "@/agent";
 import { sampleQuote, scanToActions, SAMPLE_QUOTES, type ScanResponse } from "@/quote-scanner";
 import { budgetLedgerCsv, runSheetHtml } from "@/export";
-import { type EventType, type History, type Store, freshHistory, historyOf, loadStore, presetFor, saveStore } from "@/persistence";
+import { type History, type Store, freshHistory, historyOf, loadStore, saveStore, storedTitles } from "@/persistence";
+import { defaultTemplateFor, presentationFor, requireTemplate, slotFor, templateLabel, type TemplateId } from "@/config/event-templates";
 import CommandBar from "./CommandBar";
 import BudgetCard from "./BudgetCard";
 import TimelineCard from "./TimelineCard";
@@ -17,6 +17,7 @@ import TaskCard from "./TaskCard";
 import ArchetypeCard from "./ArchetypeCard";
 import GuestMicrosite from "./GuestMicrosite";
 import ChatSidebar, { type ChatMsg, type UIAction } from "./ChatSidebar";
+import CopilotDrawer from "./CopilotDrawer";
 import { publicCount } from "@/visibility";
 import ShareDialog from "./ShareDialog";
 import { useSharedEvent } from "./useSharedEvent";
@@ -57,15 +58,20 @@ export default function PlannerApp() {
   const [forceOffline, setForceOffline] = useState(false);
   const [mode, setMode] = useState<"gemini" | "offline" | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
+  // The Co-Pilot drawer is closed by default; its chat state stays here (and in ChatSidebar) whether it is open or not.
+  const [copilotOpen, setCopilotOpen] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
+  const copilotTitleId = useId();
 
   const hist = historyOf(store);
   const plan = hist.snaps[hist.idx]!.plan;
   const insights = computePlanInsights(plan, today);
+  const template = presentationFor(store.active, plan);
   const actingGuestId = plan.guests.some(g => g.id === actingGuest) ? actingGuest : plan.guests[0]?.id ?? null;
 
   // ---------- state plumbing (refs mirror state for synchronous reads inside handlers) ----------
   const setStore = (s: Store) => { storeRef.current = s; setStoreState(s); saveStore(s); };
-  const setHist = (h: History, t: EventType = storeRef.current.active) => setStore({ ...storeRef.current, active: t, byType: { ...storeRef.current.byType, [t]: h } });
+  const setHist = (h: History, t: TemplateId = storeRef.current.active) => setStore({ ...storeRef.current, active: t, byType: { ...storeRef.current.byType, [t]: h } });
   const setToday = (d: string) => { setTodayState(d); setStore({ ...storeRef.current, today: d }); };
   const currentHist = () => historyOf(storeRef.current);
   const current = () => { const h = currentHist(); return h.snaps[h.idx]!.plan; };
@@ -74,7 +80,9 @@ export default function PlannerApp() {
   const toast = (tone: Toast["tone"], text: string) => {
     const id = ++uid;
     setToasts(t => [...t.slice(-3), { id, tone, text }]);
-    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3800);
+    setAnnouncement(text);
+    // Errors stay up longer so there is time to read them (WCAG 2.2.1); every toast is also in a polite live region.
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), tone === "rose" ? 9000 : 4500);
   };
   const flash = (ids: string[]) => {
     const key = Date.now();
@@ -82,7 +90,7 @@ export default function PlannerApp() {
     setTimeout(() => setHighlight(h => (h.key === key ? { ids: new Set(), key } : h)), 3100);
   };
   const push = (next: AgentState, label: string) => {
-    const t = next.event.eventType;
+    const t = slotFor(storeRef.current.active, next);
     const h = historyOf(storeRef.current, t);
     const before = h.snaps[h.idx]!.plan;
     setHist({ snaps: [...h.snaps.slice(0, h.idx + 1), { plan: next, label }].slice(-50), idx: Math.min(h.idx + 1, 49) }, t);
@@ -92,21 +100,21 @@ export default function PlannerApp() {
   /** The only way the canvas changes: through the deterministic reducer, under the current role. */
   const commitWith = (r: Role, batch: BatchInput, label?: string): BatchResult => {
     const res = applyBatch(current(), batch, { role: r });
-    if (res.ok) { push(res.state, label ?? batch.summary); toast("emerald", `✓ ${res.log.join(" · ") || batch.summary}`); }
+    if (res.ok) { push(res.state, label ?? batch.summary); toast("emerald", `Applied: ${res.log.join(" · ") || batch.summary}`); }
     else toast("rose", `Not applied: ${res.reason}`);
     return res;
   };
   const commit: Commit = (batch, label) => commitWith(role, batch, label);
   const loadPlan = (p: AgentState, label: string) => { push(p, label); toast("emerald", `Loaded ${p.event.title}`); };
-  const switchType = (t: EventType) => {
+  const switchTemplate = (t: TemplateId) => {
     if (t === storeRef.current.active) return;
     setStore({ ...storeRef.current, active: t, byType: { ...storeRef.current.byType, [t]: historyOf(storeRef.current, t) } });
     flash([]);
   };
-  const resetPreset = () => {
+  const resetTemplate = () => {
     const t = storeRef.current.active;
     setHist(freshHistory(t), t);
-    toast("slate", `Reset to the clean ${presetFor(t).label} preset`);
+    toast("slate", `Reset to the clean ${templateLabel(requireTemplate(t))} preset`);
   };
   const goTo = (idx: number) => {
     const h = currentHist();
@@ -140,9 +148,11 @@ export default function PlannerApp() {
     if (!t || busy) return;
     const r = role;
     if (r === "organizer" && /haldi/i.test(t) && !current().subEvents.some(s => s.slug === "haldi")) {
-      switchType("wedding");
-      if (!current().subEvents.some(s => s.slug === "haldi")) resetPreset();
-      toast("slate", "Switched to the Royal Wedding for this prompt");
+      // The judge prompts that mention the Haldi are written for the wedding template: jump there instead of failing.
+      const wedding = defaultTemplateFor("wedding");
+      switchTemplate(wedding.id as TemplateId);
+      if (!current().subEvents.some(s => s.slug === "haldi")) resetTemplate();
+      toast("slate", `Switched to the ${wedding.name} for this prompt`);
     }
     setMsgs(r, ms => [...ms, { id: nid(), role: "user", text: t }]);
     setBusy(true);
@@ -171,7 +181,7 @@ export default function PlannerApp() {
   const scan = async (input: ScanInput) => {
     if (busy) return;
     if (role !== "organizer") { setRole("organizer"); }
-    const label = "sampleId" in input ? `📄 ${SAMPLE_QUOTES.find(s => s.id === input.sampleId)?.title ?? "Sample quote"}` : `📎 ${input.file.name}`;
+    const label = "sampleId" in input ? `sample "${SAMPLE_QUOTES.find(s => s.id === input.sampleId)?.title ?? "Sample quote"}"` : `file "${input.file.name}"`;
     setMsgs("organizer", ms => [...ms, { id: nid(), role: "user", text: `Scan vendor quote: ${label}` }]);
     setBusy(true);
     const state = current();
@@ -185,10 +195,11 @@ export default function PlannerApp() {
       if (!res.ok) throw new Error(j.message ?? j.error ?? `HTTP ${res.status}`);
       ingest("organizer", { reply: j.reply, actions: j.actions, warning: j.warning, mode: j.source === "gemini" ? "gemini" : "offline" }, replyId);
       if (j.actions.some(a => a.kind === "batch")) toast("slate", "Quote read. Review the red flags and approve to update the budget.");
+      else setAnnouncement("Quote scan finished.");
     } catch (e) {
       const q = "sampleId" in input ? sampleQuote(input.sampleId, today) : null;
       if (q) ingest("organizer", { ...scanToActions(q, state, today, "organizer", "sample"), warning: "Server unreachable: parsed the sample locally." }, replyId);
-      else ingest("organizer", { reply: `I couldn't scan that file: ${e instanceof Error ? e.message : "error"}.`, actions: [] }, replyId);
+      else { ingest("organizer", { reply: `I couldn't scan that file: ${e instanceof Error ? e.message : "error"}.`, actions: [] }, replyId); setAnnouncement("Quote scan failed."); }
     } finally {
       setBusy(false);
     }
@@ -212,39 +223,46 @@ export default function PlannerApp() {
     else download(`${plan.event.id}-run-sheet.html`, runSheetHtml(plan, today), "text/html;charset=utf-8");
   };
 
+  // Dashboard actions whose answer lands in the chat (AI pitch, scanning a quote) open the drawer so the result is visible.
+  const askFromDashboard = (text: string) => { setCopilotOpen(true); void send(text); };
+  const scanFromDashboard = (input: ScanInput) => { setCopilotOpen(true); void scan(input); };
+  const copilotTitle = role === "guest" ? "Guest Concierge" : "AI Co-Pilot";
+
   return (
-    <div className="flex h-screen w-full overflow-hidden">
-      <main className="flex min-w-0 flex-[7] flex-col overflow-hidden">
-        <CommandBar
-          plan={plan} today={today} setToday={setToday} insights={insights} activeType={store.active}
-          storedTitles={Object.fromEntries(PRESETS.map(p => { const h = store.byType[p.key]; return [p.key, h ? h.snaps[h.idx]!.plan.event.title : null]; }))}
-          onSwitch={switchType} onReset={resetPreset} role={role} setRole={setRole}
-          history={hist.snaps.map(s => s.label)} historyIdx={hist.idx} goTo={goTo} flash={flash}
-          onExportCsv={exportCsv} onExportRunSheet={exportRunSheet} onShare={() => setShareOpen(true)} shared={!!shared.share}
-        />
-        <ShareDialog open={shareOpen} onClose={() => setShareOpen(false)} share={shared.share} status={shared.status}
-          onPublish={() => void shared.publish()} onSync={shared.syncNow} onForget={shared.forget} visibility={publicCount(plan)} />
-        <div className="scroll-thin flex-1 overflow-y-auto p-4">
-          {role === "guest" ? (
-            <GuestMicrosite plan={plan} today={today} commit={commit} highlight={highlight} actingGuestId={actingGuestId} setActingGuestId={setActingGuest} />
-          ) : (
-            <div className="grid grid-cols-1 gap-4 2xl:grid-cols-12">
-              <div className="2xl:col-span-7"><BudgetCard plan={plan} today={today} commit={commit} highlight={highlight} onScan={scan} busy={busy} /></div>
-              <div className="2xl:col-span-5"><TaskCard plan={plan} today={today} commit={commit} highlight={highlight} /></div>
-              <div className="2xl:col-span-12"><TimelineCard plan={plan} commit={commit} highlight={highlight} /></div>
-              <div className="2xl:col-span-12"><ArchetypeCard plan={plan} today={today} commit={commit} highlight={highlight} onAsk={send} /></div>
-            </div>
-          )}
-        </div>
-      </main>
-      <ChatSidebar
-        messages={chats[role]} busy={busy} onSend={send} onApprove={(m, a) => approveAs(role, m, a)} onReject={(m, a) => rejectAs(role, m, a)} onScan={scan}
-        mode={mode} forceOffline={forceOffline} setForceOffline={setForceOffline} plan={plan} role={role}
-        actingGuestName={plan.guests.find(g => g.id === actingGuestId)?.name ?? null}
+    <div className="flex min-h-dvh w-full flex-col lg:h-dvh lg:overflow-hidden">
+      <CommandBar
+        plan={plan} today={today} setToday={setToday} insights={insights} activeTemplate={store.active} template={template}
+        storedTitles={storedTitles(store)}
+        onSwitch={switchTemplate} onReset={resetTemplate} role={role} setRole={setRole}
+        history={hist.snaps.map(s => s.label)} historyIdx={hist.idx} goTo={goTo} flash={flash}
+        onExportCsv={exportCsv} onExportRunSheet={exportRunSheet} onShare={() => setShareOpen(true)} shared={!!shared.share}
       />
-      <div className="pointer-events-none fixed bottom-4 left-4 z-50 flex max-w-md flex-col gap-2">
+      <ShareDialog open={shareOpen} onClose={() => setShareOpen(false)} share={shared.share} status={shared.status}
+        onPublish={() => void shared.publish()} onSync={shared.syncNow} onForget={shared.forget} visibility={publicCount(plan)} />
+      {/* Full width: the Co-Pilot is an overlay, so nothing here reflows when it opens. Bottom padding keeps the launcher off the last card. */}
+      <main className="scroll-thin min-w-0 flex-1 p-3 pb-24 sm:p-4 sm:pb-24 lg:min-h-0 lg:overflow-y-auto" data-testid="dashboard">
+        {role === "guest" ? (
+          <GuestMicrosite template={template} plan={plan} today={today} commit={commit} highlight={highlight} actingGuestId={actingGuestId} setActingGuestId={setActingGuest} />
+        ) : (
+          <div className="grid grid-cols-1 gap-4 2xl:grid-cols-12">
+            <div className="min-w-0 2xl:col-span-7"><BudgetCard plan={plan} today={today} commit={commit} highlight={highlight} onScan={scanFromDashboard} busy={busy} /></div>
+            <div className="min-w-0 2xl:col-span-5"><TaskCard plan={plan} today={today} commit={commit} highlight={highlight} /></div>
+            <div className="min-w-0 2xl:col-span-12"><TimelineCard plan={plan} commit={commit} highlight={highlight} /></div>
+            <div className="min-w-0 2xl:col-span-12"><ArchetypeCard template={template} plan={plan} today={today} commit={commit} highlight={highlight} onAsk={askFromDashboard} /></div>
+          </div>
+        )}
+      </main>
+      <CopilotDrawer open={copilotOpen} onOpen={() => setCopilotOpen(true)} onClose={() => setCopilotOpen(false)} title={copilotTitle} titleId={copilotTitleId} guest={role === "guest"}>
+        <ChatSidebar
+          messages={chats[role]} busy={busy} onSend={send} onApprove={(m, a) => approveAs(role, m, a)} onReject={(m, a) => rejectAs(role, m, a)} onScan={scan}
+          mode={mode} forceOffline={forceOffline} setForceOffline={setForceOffline} plan={plan} role={role}
+          actingGuestName={plan.guests.find(g => g.id === actingGuestId)?.name ?? null}
+          titleId={copilotTitleId} onClose={() => setCopilotOpen(false)} announcement={announcement}
+        />
+      </CopilotDrawer>
+      <div role="status" aria-live="polite" className="pointer-events-none fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] left-4 right-20 z-40 flex flex-col gap-2 sm:right-auto sm:max-w-md">
         {toasts.map(t => (
-          <div key={t.id} className={`toast-in pointer-events-auto rounded-xl px-4 py-2.5 text-sm shadow-lg ${t.tone === "emerald" ? "bg-emerald-600 text-white" : t.tone === "rose" ? "bg-rose-600 text-white" : "bg-slate-800 text-white"}`}>
+          <div key={t.id} className={`toast-in pointer-events-auto break-words rounded-xl px-4 py-2.5 text-sm shadow-lg ${t.tone === "emerald" ? "bg-emerald-700 text-white" : t.tone === "rose" ? "bg-rose-700 text-white" : "bg-slate-800 text-white"}`}>
             {t.text}
           </div>
         ))}

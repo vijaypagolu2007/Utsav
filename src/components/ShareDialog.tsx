@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Copy, Link2, RefreshCw, X } from "lucide-react";
 import type { ShareInfo, ShareStatus } from "./useSharedEvent";
 
@@ -12,26 +12,43 @@ function CopyRow({ label, url, testId }: { label: string; url: string; testId?: 
       <div className="min-w-0 flex-1">
         <div className="text-xs font-medium text-slate-700">{label}</div>
         <input readOnly value={url} data-testid={testId} aria-label={`${label} link`} onFocus={e => e.currentTarget.select()}
-          className="w-full truncate rounded border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-[11px] text-slate-600" />
+          className="w-full truncate rounded border border-slate-300 bg-slate-50 px-2 py-1 font-mono text-[11px] text-slate-700" />
       </div>
       <button type="button" onClick={() => { void navigator.clipboard?.writeText(url).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); }); }}
-        className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs hover:bg-slate-50" aria-label={`Copy ${label} link`}>
-        {done ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />} {done ? "Copied" : "Copy"}
+        className="flex min-h-8 items-center gap-1 rounded-lg border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50" aria-label={`Copy ${label} link`}>
+        {done ? <Check size={12} className="text-emerald-700" /> : <Copy size={12} />} <span aria-live="polite">{done ? "Copied" : "Copy"}</span>
       </button>
     </li>
   );
 }
 
-export default function ShareDialog({ open, onClose, share, status, onPublish, onSync, onForget, visibility }: Props) {
-  if (!open) return null;
+/** Native modal <dialog>: real focus containment, inert background, Escape to close; focus goes back to the opener. */
+export default function ShareDialog(props: Props) {
+  if (!props.open) return null;
+  return <ShareDialogOpen {...props} />;
+}
+
+function ShareDialogOpen({ onClose, share, status, onPublish, onSync, onForget, visibility }: Props) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const downOnBackdrop = useRef(false);
+  useEffect(() => {
+    const d = ref.current;
+    if (!d) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (!d.open) d.showModal();
+    return () => { if (d.open) d.close(); if (opener?.isConnected) opener.focus(); };
+  }, []);
   const origin = typeof window === "undefined" ? "" : window.location.origin;
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-900/40 p-4" role="dialog" aria-modal="true" aria-labelledby="share-title">
-      <div className="max-h-[85vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-5 shadow-xl">
+    <dialog ref={ref} aria-labelledby="share-title" onClose={onClose}
+      onPointerDown={e => { downOnBackdrop.current = e.target === e.currentTarget; }}
+      onClick={e => { if (downOnBackdrop.current && e.target === e.currentTarget) onClose(); downOnBackdrop.current = false; }}
+      className="m-auto max-h-[min(85dvh,100%)] w-[calc(100%-2rem)] max-w-xl overflow-hidden rounded-2xl bg-white p-0 text-slate-900 shadow-xl backdrop:bg-slate-900/40">
+      <div className="max-h-[min(85dvh,100%)] overflow-y-auto overscroll-contain p-5">
         <div className="mb-3 flex items-center gap-2">
-          <Link2 size={18} className="text-violet-600" />
+          <Link2 size={18} className="text-violet-700" />
           <h2 id="share-title" className="text-base font-semibold">Guest links</h2>
-          <button type="button" onClick={onClose} className="ml-auto rounded p-1 hover:bg-slate-100" aria-label="Close"><X size={16} /></button>
+          <button type="button" onClick={onClose} className="ml-auto grid h-9 w-9 place-items-center rounded-lg hover:bg-slate-100" aria-label="Close" title="Close (Esc)"><X size={18} /></button>
         </div>
         <p className="mb-3 text-xs text-slate-600">
           Guests see only the itinerary, venues, dress codes and their own household&apos;s RSVPs. Budgets, vendors, tasks and other guests stay private.
@@ -50,18 +67,18 @@ export default function ShareDialog({ open, onClose, share, status, onPublish, o
           </button>
         ) : (
           <>
-            <div className="mb-2 flex items-center gap-2 text-xs text-slate-500">
-              <span data-testid="share-sync-status">{status.state === "syncing" ? "Syncing…" : status.state === "synced" ? "Synced" : status.state === "error" ? "Not synced" : "Shared"} · version {share.version}</span>
-              <button type="button" onClick={onSync} className="flex items-center gap-1 rounded border border-slate-200 px-1.5 py-0.5 hover:bg-slate-50"><RefreshCw size={11} /> Sync now</button>
+            <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+              <span data-testid="share-sync-status" role="status">{status.state === "syncing" ? "Syncing…" : status.state === "synced" ? "Synced" : status.state === "error" ? "Not synced" : "Shared"} · version {share.version}</span>
+              <button type="button" onClick={onSync} className="flex min-h-7 items-center gap-1 rounded border border-slate-300 px-2 py-0.5 text-slate-700 hover:bg-slate-50"><RefreshCw size={12} /> Sync now</button>
             </div>
             <ul className="divide-y divide-slate-100">
               <CopyRow label="Public itinerary (anyone)" url={`${origin}/guest/${share.eventId}`} testId="public-guest-link" />
               {share.invites.map(i => <CopyRow key={i.householdId} label={`${i.label} (RSVP link)`} url={`${origin}/guest/${share.eventId}#k=${i.token}`} testId={`invite-${i.householdId}`} />)}
             </ul>
-            <button type="button" onClick={onForget} className="mt-3 text-xs text-slate-500 underline">Stop syncing on this device</button>
+            <button type="button" onClick={onForget} className="mt-3 min-h-6 text-xs text-slate-600 underline">Stop syncing on this device</button>
           </>
         )}
       </div>
-    </div>
+    </dialog>
   );
 }
