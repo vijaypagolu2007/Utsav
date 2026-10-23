@@ -283,16 +283,20 @@ describe("demo prompts", () => {
     assert.equal(new Set(DEMO_PROMPTS.map(p => p.id)).size, DEMO_PROMPTS.length);
     for (const p of DEMO_PROMPTS) assert.ok(DemoPrompt.safeParse(p).success, p.id);
     assert.deepEqual(ids(promptsFor("organizer", "wedding"), p => p.text), [
-      "Cut ₹20k from decor and move the Haldi to Friday", "Cut ₹1.5L from decor", "Move the Haldi to Monday",
-      "Which vendor deposits are overdue and what tasks are urgent?", "Switch to a 30th Retro Arcade Birthday for ₹1.5L",
-      "Draft a WhatsApp to negotiate the photographer's quote",
+      "Cut ₹20k from decor and move the Haldi to Friday", "Cut ₹1.5L from decor", "Move the Haldi to Monday", "Our budget dropped by ₹50,000 and the event is 2 weeks earlier",
+      "Which vendor deposits are overdue and what tasks are urgent?", "Give me ideas for decor, food and return gifts", "Rebalance to my total",
+      "Switch to a 30th Retro Arcade Birthday for ₹1.5L", "Draft a WhatsApp to negotiate the photographer's quote",
     ]);
+    // Prompts that name the Haldi exist only for weddings (a message never switches templates to make one fit).
+    for (const t of ["birthday", "community"] as const) assert.ok(promptsFor("organizer", t).every(p => !/haldi/i.test(p.text)), t);
     assert.equal(promptsFor("organizer", "birthday").at(-1)!.text, "What's overdue and which wishes are unclaimed?");
     assert.equal(promptsFor("organizer", "community").at(-1)!.text, "Draft a sponsor pitch for SpiceRoute Foods");
     assert.equal(promptsFor("guest", "wedding").length, 4);
     assert.equal(promptsFor("guest", "birthday").length, 3);
     assert.equal(promptsFor("guest", "community").length, 3);
-    assert.ok(promptsFor("guest", "wedding").every(p => p.hint === "guest-safe"));
+    assert.ok(promptsFor("guest", "wedding").every(p => p.hint === "Guests can ask this"));
+    // Hints are user language, not engine jargon.
+    for (const p of DEMO_PROMPTS) assert.doesNotMatch(p.hint, /slack|invariant|ext polymorphism|cold-start|Tier \d|guest-safe|resolve/i, p.id);
   });
 
   test("a prompt is text only: extra keys such as commands or autoApprove are rejected", () => {

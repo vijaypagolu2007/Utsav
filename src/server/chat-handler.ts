@@ -6,7 +6,10 @@ import { z } from "zod";
 import { AgentState } from "@/schema";
 import { executeAgentTool, type AgentAction, type ChatResponse } from "@/agent";
 import { functionDeclarations, guestFunctionDeclarations, GUEST_SYSTEM_PROMPT, SYSTEM_PROMPT } from "@/gemini-tools";
-import { runOfflineAgent, runOfflineGuestAgent } from "@/offline";
+import { runOfflineAgent, runOfflineGuestAgent, runOfflineIdeas, runOfflineVendorQuestions } from "@/offline";
+import { RefineMode } from "@/ideas";
+import { checklistFor } from "@/config/vendor-checklist";
+import { IdeaKind } from "@/schema";
 import type { Role } from "@/commands";
 import { todayIST } from "@/insights";
 import { fail, issuesOf, logServer, ok, type HandlerResult } from "./http";
@@ -25,6 +28,12 @@ export const ChatRequestSchema = z.object({
   forceOffline: z.boolean().optional(),
   role: z.enum(["organizer", "guest"]).optional(),
   actingGuestId: z.string().max(64).nullable().optional(),
+  /** "Get more ideas" from the Ideas page: forces one suggest_ideas call (or the offline bank). Organizer only. */
+  ideas: z.object({ focus: z.string().trim().max(120).optional(), kind: IdeaKind.optional(),
+    /** v6: refine one idea card ("Cheaper alternative", "Make it kid-friendly", "More traditional"). */
+    refine: z.object({ mode: RefineMode, ideaId: z.string().min(1).max(64) }).strict().optional() }).strict().optional(),
+  /** v6: "Questions to ask" for one vendor-checklist slot. Organizer only; changes nothing in the plan. */
+  vendorQuestions: z.object({ need: z.string().min(1).max(40) }).strict().optional(),
 }).strict();
 
 export type ChatDeps = {
@@ -65,13 +74,22 @@ export async function handleChat(raw: unknown, deps: ChatDeps): Promise<HandlerR
   const actingGuestId = req.data.actingGuestId ?? null;
   if (actingGuestId !== null && !plan.guests.some(g => g.id === actingGuestId)) return fail(400, "invalid_guest", "actingGuestId is not a guest of this event");
 
-  const offline = (): ChatResponse => (role === "guest" ? runOfflineGuestAgent(plan, last, today, actingGuestId) : runOfflineAgent(plan, last, today));
+  const ideaReq = req.data.ideas;
+  const vq = req.data.vendorQuestions;
+  if ((ideaReq || vq) && role === "guest") return fail(403, "not_allowed", ideaReq ? "Ideas are for the organiser" : "Vendor questions are for the organiser");
+  if (ideaReq?.refine && !plan.ideas.some(i => i.id === ideaReq.refine!.ideaId)) return fail(400, "invalid_idea", "No such idea to refine");
+  if (vq && !checklistFor(plan).some(s => s.key === vq.need)) return fail(400, "invalid_need", "That isn't a vendor-checklist slot for this event");
+  const offline = (): ChatResponse => (ideaReq ? runOfflineIdeas(plan, today, ideaReq.focus ?? "", ideaReq.kind, ideaReq.refine)
+    : vq ? runOfflineVendorQuestions(plan, today, vq.need)
+    : role === "guest" ? runOfflineGuestAgent(plan, last, today, actingGuestId) : runOfflineAgent(plan, last, today));
   if (req.data.forceOffline) return ok({ ...offline(), fallbackReason: "forced" } satisfies ChatResponseBody);
   if (!deps.apiKey || !deps.generate) {
     return ok({ ...offline(), warning: "No GEMINI_API_KEY on the server: running in deterministic Demo Mode.", fallbackReason: "no_api_key" } satisfies ChatResponseBody);
   }
   try {
-    const body = await runGeminiLoop(deps.generate, messages, plan, today, role, actingGuestId, deps);
+    const body = ideaReq ? await runGeminiIdeas(deps.generate, plan, today, ideaReq, deps)
+      : vq ? await runGeminiVendorQuestions(deps.generate, plan, today, vq.need, deps)
+      : await runGeminiLoop(deps.generate, messages, plan, today, role, actingGuestId, deps);
     return ok(body);
   } catch (e) {
     if (!(e instanceof ProviderError)) throw e; // programming errors surface as 500 in the route, never as a fake success
@@ -79,6 +97,68 @@ export async function handleChat(raw: unknown, deps: ChatDeps): Promise<HandlerR
     if (!FALLBACK_OK.has(e.kind)) return fail(502, "provider_error", "The AI provider failed");
     return ok({ ...offline(), warning: FALLBACK_MESSAGE[e.kind], fallbackReason: e.kind } satisfies ChatResponseBody);
   }
+}
+
+const SUGGEST_IDEAS_DECL = functionDeclarations.filter(f => f.name === "suggest_ideas");
+export const IDEAS_MAX_STEPS = 2;
+
+/**
+ * "Get more ideas": Gemini is offered only suggest_ideas and asked to call it. Code validates the cards (rupees → paise,
+ * ranges, duplicates, category headroom). A malformed call is answered once with the reason; no call at all is a
+ * malformed response, which falls back to the curated Demo Mode bank like any other provider failure.
+ */
+const REFINE_ASK: Record<z.infer<typeof RefineMode>, string> = {
+  cheaper: "The organiser finds this too pricey. Suggest 2 to 4 CHEAPER alternatives of the same kind, each with a lower estimate than the original",
+  kid_friendly: "The organiser wants this kid-friendly. Suggest 2 to 4 versions that suit children (safe materials, shorter, something for the kids to do)",
+  traditional: "The organiser wants this more traditional. Suggest 2 to 4 versions rooted in the event's own traditions and region",
+};
+async function runGeminiIdeas(generate: GenerateFn, plan: AgentState, today: string, req: { focus?: string; kind?: z.infer<typeof IdeaKind>; refine?: { mode: z.infer<typeof RefineMode>; ideaId: string } }, deps: ChatDeps): Promise<ChatResponseBody> {
+  const stepMs = deps.stepTimeoutMs ?? geminiTimeoutMs(CHAT_STEP_TIMEOUT_MS, 45_000);
+  const deadline = Date.now() + (deps.totalTimeoutMs ?? Math.max(CHAT_TOTAL_TIMEOUT_MS, Math.min(stepMs + 10_000, 55_000)));
+  const src = req.refine ? plan.ideas.find(i => i.id === req.refine!.ideaId)! : null;
+  const ask = src && req.refine
+    ? `${REFINE_ASK[req.refine.mode]}. Original idea (${src.kind}): "${src.title}": ${src.description}${src.estLowPaise !== null ? ` Estimated ₹${(src.estLowPaise / 100).toLocaleString("en-IN")}${src.estHighPaise ? `–₹${(src.estHighPaise / 100).toLocaleString("en-IN")}` : ""}.` : ""} Call suggest_ideas now.`
+    : `Suggest new ideas for this event${req.kind ? ` (only ${req.kind.replace("_", " ")} ideas)` : ""}${req.focus ? `. Focus: ${req.focus}` : ""}. Call suggest_ideas now.`;
+  const contents: Content[] = [{ role: "user", parts: [{ text: ask }] }];
+  for (let step = 0; step < IDEAS_MAX_STEPS; step++) {
+    const left = deadline - Date.now();
+    if (left <= 0) throw new ProviderError("timeout", "Gemini ideas exceeded its time budget");
+    let res;
+    try {
+      res = await withDeadline(signal => generate({ contents, systemInstruction: SYSTEM_PROMPT(plan, today),
+        functionDeclarations: SUGGEST_IDEAS_DECL as unknown as FunctionDeclaration[], temperature: 0.7 }, { signal }), Math.min(stepMs, left));
+    } catch (e) { throw classifyProviderError(e); }
+    const calls = Array.isArray(res?.functionCalls) ? res.functionCalls : [];
+    const call = calls.find(c => c?.name === "suggest_ideas");
+    if (!call || typeof call.args !== "object" || call.args === null || Array.isArray(call.args)) throw new ProviderError("malformed_response", "Gemini didn't return idea cards");
+    const out = executeAgentTool("suggest_ideas", call.args, plan, today, "organizer", "gemini", req.refine ? { refine: req.refine } : {});
+    const r = out.response as { ok: boolean; summary?: string; note?: string; reason?: string };
+    if (r.ok) return { reply: r.summary ?? r.note ?? "No new ideas this time.", actions: out.actions, mode: "gemini" };
+    const modelContent = res.candidates?.[0]?.content;
+    contents.push(modelContent && typeof modelContent === "object" ? modelContent : { role: "model", parts: [{ functionCall: { id: call.id, name: "suggest_ideas", args: call.args as Record<string, unknown> } }] });
+    contents.push({ role: "user", parts: [{ functionResponse: { id: call.id, name: "suggest_ideas", response: out.response } }] });
+  }
+  throw new ProviderError("malformed_response", "Gemini's idea cards failed validation twice");
+}
+
+const VENDOR_Q_DECL = functionDeclarations.filter(f => f.name === "suggest_vendor_questions");
+/** v6: "Questions to ask" for one vendor slot: Gemini offered only suggest_vendor_questions; code checks the slot and shape. */
+async function runGeminiVendorQuestions(generate: GenerateFn, plan: AgentState, today: string, need: string, deps: ChatDeps): Promise<ChatResponseBody> {
+  const stepMs = deps.stepTimeoutMs ?? geminiTimeoutMs(CHAT_STEP_TIMEOUT_MS, 45_000);
+  const slot = checklistFor(plan).find(s => s.key === need)!;
+  const ask = `List 5 to 8 questions the organiser should ask a ${slot.label.toLowerCase()} for this event before booking (need: ${slot.need}). Use need "${need}". Call suggest_vendor_questions now.`;
+  let res;
+  try {
+    res = await withDeadline(signal => generate({ contents: [{ role: "user", parts: [{ text: ask }] }], systemInstruction: SYSTEM_PROMPT(plan, today),
+      functionDeclarations: VENDOR_Q_DECL as unknown as FunctionDeclaration[], temperature: 0.4 }, { signal }), deps.totalTimeoutMs ? Math.min(stepMs, deps.totalTimeoutMs) : stepMs);
+  } catch (e) { throw classifyProviderError(e); }
+  const calls = Array.isArray(res?.functionCalls) ? res.functionCalls : [];
+  const call = calls.find(c => c?.name === "suggest_vendor_questions");
+  if (!call || typeof call.args !== "object" || call.args === null || Array.isArray(call.args)) throw new ProviderError("malformed_response", "Gemini didn't return vendor questions");
+  const out = executeAgentTool("suggest_vendor_questions", { ...(call.args as Record<string, unknown>), need }, plan, today, "organizer", "gemini");
+  const r = out.response as { ok: boolean; reason?: string };
+  if (!r.ok) throw new ProviderError("malformed_response", `Gemini's vendor questions failed validation: ${r.reason}`);
+  return { reply: `Questions to ask the ${slot.label.toLowerCase()} before you book.`, actions: out.actions, mode: "gemini" };
 }
 
 async function runGeminiLoop(generate: GenerateFn, messages: z.infer<typeof ChatTurn>[], plan: AgentState, today: string, role: Role,

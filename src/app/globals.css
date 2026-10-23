@@ -4,9 +4,218 @@
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
 }
 
+/*
+ * Utsav brand palette ("festival"), derived from the logo's saffron-to-kumkum gradient. Five custom scales sit beside
+ * Tailwind's emerald / amber / red (status): sand (warm ivory to brown-black neutrals), brand (kumkum / rani pink, the
+ * primary), maroon (wedding silk, the secondary), peacock (teal, for info) and marigold (saffron and gold, decorative
+ * accents only, never small text). src/tests/a11y.test.ts reads these values to check every pair the UI uses.
+ */
+@theme {
+  --color-sand-50: oklch(98.4% 0.011 84);
+  --color-sand-100: oklch(96% 0.018 80);
+  --color-sand-200: oklch(91.8% 0.024 74);
+  --color-sand-300: oklch(86.2% 0.028 68);
+  --color-sand-400: oklch(72.5% 0.03 60);
+  --color-sand-500: oklch(58.5% 0.032 54);
+  --color-sand-600: oklch(48.5% 0.032 48);
+  --color-sand-700: oklch(40.5% 0.03 44);
+  --color-sand-800: oklch(31.5% 0.026 40);
+  --color-sand-900: oklch(23.5% 0.021 36);
+  --color-sand-950: oklch(17% 0.016 32);
+  --color-brand-50: oklch(97.3% 0.016 2);
+  --color-brand-100: oklch(94.2% 0.035 2);
+  --color-brand-200: oklch(88.8% 0.068 2);
+  --color-brand-300: oklch(80.8% 0.115 2);
+  --color-brand-400: oklch(70.5% 0.175 3);
+  --color-brand-500: oklch(62.5% 0.21 4);
+  --color-brand-600: oklch(55.5% 0.215 5);
+  --color-brand-700: oklch(48.5% 0.192 5);
+  --color-brand-800: oklch(41.5% 0.162 4);
+  --color-brand-900: oklch(35% 0.128 3);
+  --color-brand-950: oklch(25.5% 0.088 2);
+  --color-maroon-50: oklch(97% 0.013 350);
+  --color-maroon-100: oklch(93.6% 0.028 350);
+  --color-maroon-200: oklch(87.8% 0.052 350);
+  --color-maroon-300: oklch(78.5% 0.085 351);
+  --color-maroon-400: oklch(67% 0.115 352);
+  --color-maroon-500: oklch(56.5% 0.13 353);
+  --color-maroon-600: oklch(48.5% 0.13 354);
+  --color-maroon-700: oklch(41.5% 0.12 355);
+  --color-maroon-800: oklch(35% 0.105 354);
+  --color-maroon-900: oklch(29% 0.085 352);
+  --color-maroon-950: oklch(21.5% 0.06 350);
+  --color-peacock-50: oklch(97.4% 0.016 196);
+  --color-peacock-100: oklch(94.3% 0.032 196);
+  --color-peacock-200: oklch(88.8% 0.056 198);
+  --color-peacock-300: oklch(80.5% 0.085 200);
+  --color-peacock-400: oklch(70.5% 0.105 203);
+  --color-peacock-500: oklch(60.5% 0.108 206);
+  --color-peacock-600: oklch(52.5% 0.098 209);
+  --color-peacock-700: oklch(46% 0.086 212);
+  --color-peacock-800: oklch(39.5% 0.073 214);
+  --color-peacock-900: oklch(33% 0.06 216);
+  --color-peacock-950: oklch(25% 0.045 218);
+  --color-marigold-50: oklch(98.2% 0.026 92);
+  --color-marigold-100: oklch(95.6% 0.058 89);
+  --color-marigold-200: oklch(91.4% 0.105 85);
+  --color-marigold-300: oklch(86.4% 0.142 79);
+  --color-marigold-400: oklch(80.6% 0.163 71);
+  --color-marigold-500: oklch(74.4% 0.172 62);
+  --color-marigold-600: oklch(66.4% 0.172 53);
+  --color-marigold-700: oklch(52.5% 0.148 46);
+  --color-marigold-800: oklch(45.5% 0.125 44);
+  --color-marigold-900: oklch(38.5% 0.1 43);
+  --color-marigold-950: oklch(27.5% 0.07 43);
+}
+
+/*
+ * Design tokens. Each one names a palette shade, so src/tests/a11y.test.ts can resolve it and check every text/background
+ * pair the UI uses (4.5:1 for text, 3:1 for UI parts). Ivory page, white cards with warm borders, warm brown-grey text,
+ * kumkum primary, maroon secondary, peacock info, emerald / amber / red status.
+ */
+@theme {
+  --color-canvas: var(--color-sand-50);
+  --color-surface: var(--color-white);
+  --color-surface-muted: var(--color-sand-100);
+  --color-ink: var(--color-sand-900);
+  --color-ink-muted: var(--color-sand-600);
+  --color-line: var(--color-sand-200);
+  --color-line-soft: var(--color-sand-100);
+  --color-line-strong: var(--color-sand-500);
+  --color-primary: var(--color-brand-700);
+  --color-primary-hover: var(--color-brand-800);
+  --color-primary-soft: var(--color-brand-50);
+  --color-secondary: var(--color-maroon-800);
+  --color-secondary-soft: var(--color-maroon-50);
+  --color-info: var(--color-peacock-700);
+  --color-info-soft: var(--color-peacock-50);
+  --color-gold: var(--color-marigold-400);
+  --color-success: var(--color-emerald-700);
+  --color-success-soft: var(--color-emerald-50);
+  --color-warning: var(--color-amber-800);
+  --color-warning-soft: var(--color-amber-50);
+  --color-danger: var(--color-red-700);
+  --color-danger-soft: var(--color-red-50);
+}
+
+/*
+ * Dark theme (Light / Dark / System toggle; the inline script in layout.tsx sets data-theme on <html> before first
+ * paint). The design tokens above, and the palette shades components name directly, are re-pointed here: each one
+ * takes the value of its mirror shade (light surfaces become dark ones, dark text becomes light text, and a solid
+ * colour with white text becomes a light colour with dark text), so every pair keeps its contrast. The ground is a
+ * deep aubergine (white = the card surface, sand-50 = the page) with ivory text, and the brand scale turns saffron-gold
+ * so the primary stays luminous and clearly apart from danger red; maroon and peacock become their light tints.
+ * src/tests/a11y.test.ts reads this block and checks every text (4.5:1) and UI (3:1) pair in both themes.
+ * Values are literal (the status scales name their source shade) because a var() pointing at a shade that is itself
+ * remapped on the same element would be a cycle. Screen only: printing always uses the light theme.
+ */
+@media screen {
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --color-white: oklch(21.8% 0.024 345); /* card surface */
+    --color-sand-50: oklch(16.2% 0.02 345);
+    --color-sand-100: oklch(27% 0.026 345);
+    --color-sand-200: oklch(34% 0.026 345);
+    --color-sand-300: oklch(41% 0.024 345);
+    --color-sand-400: oklch(52% 0.022 340);
+    --color-sand-500: oklch(66% 0.02 40);
+    --color-sand-600: oklch(80.5% 0.018 60);
+    --color-sand-700: oklch(87.5% 0.014 66);
+    --color-sand-800: oklch(93% 0.011 72);
+    --color-sand-900: oklch(96.6% 0.008 78);
+    --color-sand-950: oklch(98.2% 0.006 82);
+    --color-brand-50: oklch(26% 0.05 48);
+    --color-brand-100: oklch(32% 0.068 50);
+    --color-brand-200: oklch(38.5% 0.088 52);
+    --color-brand-300: oklch(46.5% 0.11 55);
+    --color-brand-400: oklch(56% 0.13 58);
+    --color-brand-500: oklch(66% 0.145 62);
+    --color-brand-600: oklch(74.5% 0.148 66);
+    --color-brand-700: oklch(82% 0.135 72);
+    --color-brand-800: oklch(88% 0.105 78);
+    --color-brand-900: oklch(93% 0.065 83);
+    --color-brand-950: oklch(96.5% 0.032 86);
+    --color-maroon-50: oklch(24.5% 0.05 350);
+    --color-maroon-100: oklch(30.5% 0.066 350);
+    --color-maroon-200: oklch(37% 0.08 351);
+    --color-maroon-300: oklch(45% 0.095 352);
+    --color-maroon-400: oklch(55% 0.105 353);
+    --color-maroon-500: oklch(65% 0.1 354);
+    --color-maroon-600: oklch(73.5% 0.085 354);
+    --color-maroon-700: oklch(81% 0.068 354);
+    --color-maroon-800: oklch(87.5% 0.048 352);
+    --color-maroon-900: oklch(92.5% 0.03 350);
+    --color-maroon-950: oklch(96.5% 0.014 350);
+    --color-peacock-50: oklch(25% 0.04 214);
+    --color-peacock-100: oklch(31% 0.055 212);
+    --color-peacock-200: oklch(37.5% 0.068 210);
+    --color-peacock-300: oklch(45% 0.08 207);
+    --color-peacock-400: oklch(55% 0.095 204);
+    --color-peacock-500: oklch(65% 0.1 202);
+    --color-peacock-600: oklch(74% 0.095 200);
+    --color-peacock-700: oklch(81.5% 0.08 198);
+    --color-peacock-800: oklch(88% 0.058 197);
+    --color-peacock-900: oklch(93% 0.034 196);
+    --color-peacock-950: oklch(96.5% 0.016 196);
+    --color-marigold-50: oklch(26.5% 0.055 55);
+    --color-marigold-100: oklch(33% 0.075 58);
+    --color-marigold-200: oklch(40% 0.095 62);
+    --color-marigold-300: oklch(86.4% 0.142 79);
+    --color-marigold-400: oklch(80.6% 0.163 71);
+    --color-marigold-500: oklch(55.5% 0.15 50);
+    --color-marigold-600: oklch(66% 0.16 48);
+    --color-marigold-700: oklch(71% 0.165 42);
+    --color-marigold-800: oklch(82% 0.12 60);
+    --color-marigold-900: oklch(92.5% 0.075 85);
+    --color-marigold-950: oklch(96.5% 0.035 90);
+    --color-emerald-50: oklch(26.2% 0.051 172.552); /* emerald-950 */
+    --color-emerald-100: oklch(37.8% 0.077 168.94); /* emerald-900 */
+    --color-emerald-200: oklch(43.2% 0.095 166.913); /* emerald-800 */
+    --color-emerald-300: oklch(50.8% 0.118 165.612); /* emerald-700 */
+    --color-emerald-400: oklch(59.6% 0.145 163.225); /* emerald-600 */
+    --color-emerald-500: oklch(69.6% 0.17 162.48); /* emerald-500 */
+    --color-emerald-600: oklch(72% 0.13 165); /* softened emerald-400 */
+    --color-emerald-700: oklch(79% 0.12 166); /* softened emerald-300: less neon on the aubergine ground */
+    --color-emerald-800: oklch(90.5% 0.093 164.15); /* emerald-200 */
+    --color-emerald-900: oklch(95% 0.052 163.051); /* emerald-100 */
+    --color-emerald-950: oklch(97.9% 0.021 166.113); /* emerald-50 */
+    --color-amber-50: oklch(27.9% 0.077 45.635); /* amber-950 */
+    --color-amber-100: oklch(41.4% 0.112 45.904); /* amber-900 */
+    --color-amber-200: oklch(47.3% 0.137 46.201); /* amber-800 */
+    --color-amber-300: oklch(55.5% 0.163 48.998); /* amber-700 */
+    --color-amber-400: oklch(66.6% 0.179 58.318); /* amber-600 */
+    --color-amber-500: oklch(55.5% 0.163 48.998); /* amber-700 */
+    --color-amber-600: oklch(82.8% 0.189 84.429); /* amber-400 */
+    --color-amber-700: oklch(87.9% 0.169 91.605); /* amber-300 */
+    --color-amber-800: oklch(92.4% 0.12 95.746); /* amber-200 */
+    --color-amber-900: oklch(96.2% 0.059 95.617); /* amber-100 */
+    --color-amber-950: oklch(98.7% 0.022 95.277); /* amber-50 */
+    --color-red-50: oklch(25.8% 0.092 26.042); /* red-950 */
+    --color-red-100: oklch(39.6% 0.141 25.723); /* red-900 */
+    --color-red-200: oklch(44.4% 0.177 26.899); /* red-800 */
+    --color-red-300: oklch(50.5% 0.213 27.518); /* red-700 */
+    --color-red-400: oklch(57.7% 0.245 27.325); /* red-600 */
+    --color-red-500: oklch(63.7% 0.237 25.331); /* red-500 */
+    --color-red-600: oklch(70.4% 0.191 22.216); /* red-400 */
+    --color-red-700: oklch(80.8% 0.114 19.571); /* red-300 */
+    --color-red-800: oklch(88.5% 0.062 18.334); /* red-200 */
+    --color-red-900: oklch(93.6% 0.032 17.717); /* red-100 */
+    --color-red-950: oklch(97.1% 0.013 17.38); /* red-50 */
+  }
+  :root[data-theme="dark"] dialog::backdrop { background-color: rgb(12 4 9 / 0.65); }
+  :root[data-theme="dark"] .festive-rule::after { background-image: linear-gradient(90deg, oklch(80.6% 0.163 71), oklch(74.4% 0.172 62) 30%, oklch(62.5% 0.21 4) 70%, oklch(56.5% 0.13 353)); }
+}
+
+/* Mobile bottom tab bar height (excluding the safe-area inset). Main content, toasts and scroll padding all reserve it. */
+:root { --tabbar-h: 4rem; --header-h: 4.25rem; }
+
+body { line-height: 1.5; }
+
 /* 3-second emerald pulse on anything the last change touched. Two identical keyframes let a new change restart it. */
-@keyframes pulse-a { 0%, 100% { box-shadow: 0 0 0 0 rgb(16 185 129 / 0); background-color: transparent; } 15%, 60% { box-shadow: 0 0 0 3px rgb(16 185 129 / 0.55); background-color: rgb(209 250 229 / 0.7); } }
-@keyframes pulse-b { 0%, 100% { box-shadow: 0 0 0 0 rgb(16 185 129 / 0); background-color: transparent; } 15%, 60% { box-shadow: 0 0 0 3px rgb(16 185 129 / 0.55); background-color: rgb(209 250 229 / 0.7); } }
+/* The tint follows the theme (emerald-100 in light, its dark mirror in dark) so text stays readable while it pulses. */
+:root { --hl-tint: color-mix(in srgb, var(--color-emerald-100, rgb(209 250 229)) 70%, transparent); }
+@keyframes pulse-a { 0%, 100% { box-shadow: 0 0 0 0 rgb(16 185 129 / 0); background-color: transparent; } 15%, 60% { box-shadow: 0 0 0 3px rgb(16 185 129 / 0.55); background-color: var(--hl-tint); } }
+@keyframes pulse-b { 0%, 100% { box-shadow: 0 0 0 0 rgb(16 185 129 / 0); background-color: transparent; } 15%, 60% { box-shadow: 0 0 0 3px rgb(16 185 129 / 0.55); background-color: var(--hl-tint); } }
 .hl-a { animation: pulse-a 3s ease-in-out 1; border-radius: 0.5rem; }
 .hl-b { animation: pulse-b 3s ease-in-out 1; border-radius: 0.5rem; }
 
@@ -15,13 +224,79 @@
 
 .scroll-thin { scrollbar-width: thin; }
 
+/* Shape cues so colour is never the only signal: budget segments and timeline lanes each carry a pattern.
+   --pat is white in the light theme and the dark surface in the dark theme (where the bars turn light). */
+:root { --pat: var(--color-white, #fff); }
+.pat-stripes { background-image: repeating-linear-gradient(135deg, color-mix(in srgb, var(--pat) 45%, transparent) 0 2px, transparent 2px 6px); }
+.pat-cross { background-image: repeating-linear-gradient(45deg, color-mix(in srgb, var(--pat) 50%, transparent) 0 2px, transparent 2px 6px), repeating-linear-gradient(135deg, color-mix(in srgb, var(--pat) 50%, transparent) 0 2px, transparent 2px 6px); }
+.lane-pat-0 { background-image: none; }
+.lane-pat-1 { background-image: repeating-linear-gradient(135deg, color-mix(in srgb, var(--pat) 55%, transparent) 0 2px, transparent 2px 5px); }
+.lane-pat-2 { background-image: radial-gradient(color-mix(in srgb, var(--pat) 70%, transparent) 1.2px, transparent 1.4px); background-size: 5px 5px; }
+.lane-pat-3 { background-image: repeating-linear-gradient(0deg, color-mix(in srgb, var(--pat) 55%, transparent) 0 2px, transparent 2px 5px); }
+.lane-pat-4 { background-image: repeating-linear-gradient(90deg, color-mix(in srgb, var(--pat) 55%, transparent) 0 2px, transparent 2px 5px); }
+.lane-pat-5 { background-image: repeating-linear-gradient(45deg, color-mix(in srgb, var(--pat) 55%, transparent) 0 2px, transparent 2px 5px), repeating-linear-gradient(135deg, color-mix(in srgb, var(--pat) 55%, transparent) 0 2px, transparent 2px 5px); }
+
+/* ---------- festive accents (decorative only: no text sits on the gradient rules, and each has a plain fallback) ---------- */
+/*
+ * The logo tile and the guest heroes keep the brand's own colours in both themes (they are identity, not surfaces):
+ * literal light-theme shades, and --color-white reset to real white inside the hero so its white text stays white.
+ */
+:root {
+  --logo-gradient: linear-gradient(135deg, oklch(80.6% 0.163 71) 0%, oklch(66.4% 0.172 53) 32%, oklch(55.5% 0.215 5) 68%, oklch(41.5% 0.12 355) 100%);
+  /* Active page tab: saffron to kumkum to maroon, every stop 3:1 or better on the card surface in both themes. */
+  --tab-rule: linear-gradient(90deg, var(--color-marigold-700), var(--color-brand-700) 55%, var(--color-maroon-700));
+}
+.logo-tile { background-image: var(--logo-gradient); color: oklch(100% 0 0); }
+/* A 2px saffron-kumkum-maroon thread under the sticky header. */
+.festive-rule::after {
+  content: ""; position: absolute; inset-inline: 0; bottom: -1px; height: 2px; pointer-events: none;
+  background-image: linear-gradient(90deg, oklch(80.6% 0.163 71), oklch(66.4% 0.172 53) 30%, oklch(55.5% 0.215 5) 68%, oklch(41.5% 0.12 355));
+}
+/*
+ * Guest View and public invitation banner: maroon silk to kumkum with a soft marigold glow and a gold zari edge.
+ * White text is 5.2:1 or better at every point (the glow peaks at 30% over the lightest stop, kumkum).
+ */
+.hero-silk {
+  --color-white: oklch(100% 0 0);
+  background-color: oklch(35% 0.105 354);
+  background-image: radial-gradient(circle at 100% 0%, rgb(255 171 42 / 0.3), transparent 42%),
+    linear-gradient(120deg, oklch(29% 0.085 352) 0%, oklch(35% 0.105 354) 45%, oklch(48.5% 0.192 5) 100%);
+  box-shadow: inset 0 -3px 0 oklch(80.6% 0.163 71), 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+/*
+ * Overview hero: the card surface warmed by two soft glows. --hero-a / --hero-b are pale tints, so the heading text
+ * on them keeps its contrast (checked in a11y.test.ts at the tint itself, the worst point). The event type picks the
+ * second glow: wedding maroon, birthday kumkum, community peacock.
+ */
+.festive-hero {
+  --hero-a: var(--color-marigold-100); --hero-b: var(--color-brand-50);
+  background-color: var(--color-surface);
+  background-image: radial-gradient(ellipse 60% 120% at 0% 0%, var(--hero-a), transparent 70%), radial-gradient(ellipse 55% 110% at 100% 0%, var(--hero-b), transparent 70%);
+  border-bottom: 1px solid var(--color-line);
+}
+/* Below 640px the hero bleeds edge to edge (it keeps the page's full content width); from 640px it is a framed panel. */
+@media (min-width: 40rem) { .festive-hero { border: 1px solid var(--color-line); } }
+.festive-hero[data-event-type="wedding"] { --hero-b: var(--color-maroon-50); }
+.festive-hero[data-event-type="birthday"] { --hero-b: var(--color-brand-50); }
+.festive-hero[data-event-type="community"] { --hero-b: var(--color-peacock-50); }
+
 /* ---------- accessibility ---------- */
-/* One visible, high-contrast focus ring for every control (violet-700 is 7.3:1 on white). Keyboard focus only. */
-:where(a, button, input, select, textarea, summary, dialog, [tabindex]):focus-visible { outline: 2px solid var(--color-violet-700); outline-offset: 2px; }
+/* One visible, high-contrast focus ring for every control: kumkum (7.1:1 on white) in light, saffron-gold in dark. Keyboard focus only. */
+:where(a, button, input, select, textarea, summary, dialog, [tabindex]):focus-visible { outline: 2px solid var(--color-brand-700); outline-offset: 2px; }
 /* Placeholders at body-copy contrast (Tailwind's default is a 50% tint of the text colour). */
-::placeholder { color: var(--color-slate-500); opacity: 1; }
-/* Keep the focused element clear of the floating Co-Pilot launcher when the page scrolls it into view. */
-html { scroll-padding-bottom: 5rem; }
+::placeholder { color: var(--color-sand-600); opacity: 1; }
+
+/*
+ * Keep focused / scrolled-to elements clear of the fixed chrome: the sticky header (768px and up) and the bottom tab
+ * bar plus its safe-area inset (below 768px). These match the padding PlannerApp reserves under the tab bar.
+ */
+html { scroll-padding-top: 1rem; scroll-padding-bottom: 1rem; }
+@media (max-width: 47.99rem) {
+  html { scroll-padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 1rem); }
+}
+@media (min-width: 48rem) {
+  html { scroll-padding-top: calc(var(--header-h) + 1rem); }
+}
 
 /* AI Co-Pilot drawer: a short slide in from the right. */
 @keyframes drawer-in { from { transform: translateX(100%); } to { transform: none; } }
@@ -35,5 +310,17 @@ dialog.drawer[open]::backdrop { animation: backdrop-in 220ms ease-out; }
     transition-duration: 0.01ms !important; scroll-behavior: auto !important;
   }
   /* The "what just changed" pulse becomes a steady outline for its 3 seconds instead of an animation. */
-  .hl-a, .hl-b { animation: none !important; box-shadow: 0 0 0 3px rgb(16 185 129 / 0.55); background-color: rgb(209 250 229 / 0.7); }
+  .hl-a, .hl-b { animation: none !important; box-shadow: 0 0 0 3px rgb(16 185 129 / 0.55); background-color: var(--hl-tint); }
+}
+
+/* Users who ask for more contrast get darker borders and secondary text, and the decorative glows step aside. */
+@media (prefers-contrast: more) {
+  :root { --color-line: var(--color-sand-500); --color-line-soft: var(--color-sand-400); --color-ink-muted: var(--color-sand-800); }
+  .festive-hero { background-image: none; }
+  .hero-silk { background-image: none; background-color: oklch(29% 0.085 352); }
+}
+/* Windows high contrast: let the system colours through. */
+@media (forced-colors: active) {
+  .festive-rule::after { display: none; }
+  .hero-silk, .festive-hero, .logo-tile { background-image: none; }
 }

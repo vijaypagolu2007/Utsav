@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { THEME_BOOT_SCRIPT } from "@/theme";
 
 export const metadata: Metadata = {
   title: "Utsav — GenAI Event Planning Co-Pilot",
@@ -12,8 +13,11 @@ export const viewport: Viewport = { width: "device-width", initialScale: 1, view
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en-IN">
-      <body className="bg-slate-50 text-slate-900 antialiased">{children}</body>
+    // The inline script sets data-theme before first paint (no light flash in dark mode). It changes <html>
+    // attributes React didn't render, hence suppressHydrationWarning (it only covers this element's own attributes).
+    <html lang="en-IN" suppressHydrationWarning>
+      <head><script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} /></head>
+      <body className="bg-canvas text-ink antialiased">{children}</body>
     </html>
   );
 }

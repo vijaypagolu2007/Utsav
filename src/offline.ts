@@ -6,6 +6,10 @@ import { householdOf, visibleSubEventIds } from "./visibility";
 import type { InitializeEventPlanInput } from "./blueprint";
 import { executeAgentTool, type AgentAction, type ChatResponse } from "./agent";
 import { computePlanInsights } from "./insights";
+import { demoIdeas, demoRefine, IDEA_KINDS, kindsIn, type Refine } from "./ideas";
+import { buildPriorityFix, buildRevision, planPriorityCut, cutCommands, explainCut } from "./priorities";
+import { checklistFor } from "./config/vendor-checklist";
+import { blueprintFromSetup, defaultSetupCategories } from "./setup";
 
 // ---------- amount & phrase parsing ----------
 /** "₹20k" → 2000000, "1.5L" → 15000000, "₹25,000" → 2500000, "2 crore" → 2000000000 (all paise). */
@@ -38,7 +42,7 @@ const findCategory = (s: string) => CATEGORY_WORDS.find(([re]) => re.test(s))?.[
 
 function findSubEventRef(st: AgentState, s: string): string | null {
   const t = s.toLowerCase();
-  const hit = st.subEvents.find(x => t.includes(x.slug) || t.includes(x.name.toLowerCase()));
+  const hit = st.subEvents.find(x => t.includes(x.slug) || t.includes(x.name.toLowerCase()) || (x.slug.includes("-") && t.includes(x.slug.replace(/-/g, " "))));
   return hit?.slug ?? null;
 }
 
@@ -115,8 +119,14 @@ export function blueprintFromPrompt(text: string, today: string): InitializeEven
     anchor = `${y}-${String(mIdx + 1).padStart(2, "0")}-08`;
   } else anchor = addDays(today, type === "wedding" ? 120 : type === "birthday" ? 45 : 60);
 
+  // Traditions, ages and venues the fixed flagship blueprints below don't fit use the setup builder (setup.ts) instead.
+  const viaSetup = (style: string, days: number, start: string) => blueprintFromSetup({ eventType: type, style, city, startDate: start, endDate: addDays(start, days - 1),
+    guestCount: Math.max(1, guests), totalBudgetRupees: Math.max(1000, budgetRupees), note: text.slice(0, 1000), categories: defaultSetupCategories(type, style) });
   if (type === "wedding") {
     const days = Math.min(5, Math.max(2, Number(text.match(/(\d)\s*-?\s*day/i)?.[1] ?? 3)));
+    const other = /christian|church/i.test(text) ? "christian" : /muslim|nikah|walima/i.test(text) ? "muslim" : /sikh|anand karaj/i.test(text) ? "sikh"
+      : /civil|court|regist/i.test(text) ? "civil" : /punjabi|north indian|marwari|gujarati/i.test(text) ? "north-hindu" : null;
+    if (other) return viaSetup(other, days, onOrAfter(anchor, "saturday"));
     const main = onOrAfter(anchor, "sunday");
     const start = addDays(main, -(days - 1));
     const names = text.match(/([A-Z][a-z]+)\s*(?:&|and)\s*([A-Z][a-z]+)/);
@@ -181,6 +191,12 @@ export function blueprintFromPrompt(text: string, today: string): InitializeEven
     const theme = titleCase(themeRaw.replace(/^(a|an|the)\s+/i, ""));
     const honoree = text.match(/\bfor\s+([A-Z][a-z]+)\b(?!\s*(?:guests|people))/)?.[1] ?? text.match(/([A-Z][a-z]+)'s/)?.[1] ?? "the guest of honour";
     const day = onOrAfter(anchor, "saturday");
+    const kid = (age !== null && age <= 12) || /\b(kid|kids|child|children|son|daughter|toddler)\b/i.test(text);
+    const home = /\bat home\b|home party|our (house|flat|apartment|terrace)/i.test(text);
+    if (kid || home) {
+      const b = viaSetup(kid ? (home ? "kid-home" : "kid-venue") : "adult-home", 1, day);
+      return b.ext.type === "birthday" ? { ...b, ext: { ...b.ext, honoree: honoree === "the guest of honour" ? b.ext.honoree : honoree, turningAge: age, theme: themeRaw === "Classic party" ? b.ext.theme : theme } } : b;
+    }
     const arcade = /arcade|retro|gam/i.test(theme);
     return {
       title: `${age ? `${age}${["th", "st", "nd", "rd"][age % 10 > 3 || Math.floor(age / 10) % 10 === 1 ? 0 : age % 10]} ` : ""}${theme} Birthday`,
@@ -226,6 +242,8 @@ export function blueprintFromPrompt(text: string, today: string): InitializeEven
   }
 
   // community
+  if (/ganesh|ganapati|vinayaka|chaturthi/i.test(text)) return viaSetup("ganesh", Math.min(11, Math.max(2, Number(text.match(/(\d+)\s*-?\s*day/i)?.[1] ?? 5))), onOrAfter(anchor, "saturday"));
+  if (/navratri|garba|dandiya/i.test(text)) return viaSetup("navratri", 9, onOrAfter(anchor, "saturday"));
   const kind = text.match(/(diwali|ganesh|navratri|holi|christmas|eid|onam|sankranti|pongal|cultural)/i)?.[1];
   const form = text.match(/\b(mela|fest|festival|carnival|utsav)\b/i)?.[1] ?? "fest";
   const day = onOrAfter(anchor, "saturday");
@@ -302,11 +320,108 @@ function offlineDraft(st: AgentState, text: string): { channel: "whatsapp" | "em
   return null;
 }
 
+/** Ideas from the curated bank, through the same suggest_ideas tool (and the same code checks) Gemini uses. */
+export function runOfflineIdeas(st: AgentState, today: string, focus = "", kind?: (typeof IDEA_KINDS)[number], refine?: Refine): ChatResponse {
+  const input = refine ? demoRefine(st, refine) : demoIdeas(st, { focus, ...(kind ? { kind } : {}) });
+  const r = executeAgentTool("suggest_ideas", input, st, today, "organizer", "demo", refine ? { refine } : {});
+  const res = r.response as { ok: boolean; summary?: string; reason?: string; note?: string };
+  return { mode: "offline", actions: r.actions, reply: res.ok ? (res.summary ?? res.note ?? "No new ideas this time.") : `I couldn't put ideas together: ${res.reason}` };
+}
+
+/** v6: offline "Questions to ask": the curated bank for that checklist slot, through the same tool and checks Gemini uses. */
+export function runOfflineVendorQuestions(st: AgentState, today: string, need: string): ChatResponse {
+  const slot = checklistFor(st).find(s => s.key === need);
+  const r = executeAgentTool("suggest_vendor_questions", { need, questions: slot?.questions ?? [] }, st, today, "organizer", "demo");
+  const res = r.response as { ok: boolean; reason?: string };
+  return { mode: "offline", actions: r.actions, reply: res.ok ? `Questions to ask the ${slot!.label.toLowerCase()} before you book (from the curated Demo Mode bank).` : `I couldn't list questions: ${res.reason}` };
+}
+
+const WORD_NUM: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, ten: 10 };
+/** "2 weeks earlier", "ten days later", "a week sooner", "brought forward by 3 days" → signed days (code, not the LLM). */
+export function parseShiftDays(text: string): number | null {
+  const t = text.toLowerCase();
+  const NUM = "(\\d{1,2}|a|an|one|two|three|four|five|six|seven|eight|ten)";
+  const UNIT = "(days?|weeks?)";
+  const DIR = "(earlier|sooner|forward|later|postponed|delayed|pushed back)";
+  let num: string, unit: string, dir: string;
+  const a = t.match(new RegExp(`\\b${NUM}\\s+${UNIT}\\s+(?:\\w+\\s+){0,2}?${DIR}\\b`));
+  const b = a ? null : t.match(new RegExp(`\\b${DIR}\\s+(?:\\w+\\s+){0,3}?by\\s+${NUM}\\s+${UNIT}\\b`));
+  if (a) [num, unit, dir] = [a[1]!, a[2]!, a[3]!];
+  else if (b) [dir, num, unit] = [b[1]!, b[2]!, b[3]!];
+  else return null;
+  const n = /^\d/.test(num) ? Number(num) : WORD_NUM[num]!;
+  const days = n * (unit.startsWith("week") ? 7 : 1);
+  return /earlier|sooner|forward/.test(dir) ? -days : days;
+}
+
 /** The offline brain: same tools, deterministic parsing. */
 export function runOfflineAgent(st: AgentState, text: string, today: string): ChatResponse {
   const actions: AgentAction[] = [];
   const t = text.trim();
   const lower = t.toLowerCase();
+
+  // Ideas and advice: "give me sangeet ideas", "eco-friendly return gift ideas under ₹50k"
+  if (/\b(ideas?|inspiration|suggestions?|suggest)\b/i.test(t) && !/\b(switch to|plan an?|create an?|set up an?)\b/i.test(t)) {
+    const focus = t.replace(/\b(give|show|get|me|some|more|please|any|ideas?|suggestions?|suggest|inspiration|for|the|our|my)\b/gi, " ").replace(/\s+/g, " ").trim();
+    const named = kindsIn(t);
+    return runOfflineIdeas(st, today, focus, named.length === 1 ? named[0] : undefined);
+  }
+
+  // v6: revise, don't restart: "our budget dropped by ₹50,000 and the event is 2 weeks earlier" → one approval card.
+  const shift = parseShiftDays(t);
+  const budgetMove = t.match(/\bbudget\b[^.]*?\b(dropped|drops|down|cut|reduced|reduce|lower(?:ed)?|shrunk|fell|decreased|up|increased|raised|grew)\b[^.]*?(?:by\s+)?((?:₹|rs\.?\s*|inr\s*)?\d[\d,]*(?:\.\d+)?\s*(?:k|thousand|lakhs?|lacs?|l|crores?|cr)?)\b/i)
+    ?? t.match(/\b(lost|lose|down|cut|save|need to save|up|extra|more)\s+((?:₹|rs\.?\s*|inr\s*)?\d[\d,]*(?:\.\d+)?\s*(?:k|thousand|lakhs?|lacs?|l|crores?|cr)?)\b[^.]*\bbudget\b/i);
+  const guestsTo = t.match(/\b(?:guests?|guest count|head ?count)\b[^.]*?\b(?:to|now|is|are)\s+(\d{1,6})\b/i)?.[1] ?? t.match(/\b(\d{1,6})\s+guests?\s+(?:now|instead)\b/i)?.[1];
+  if (shift !== null || budgetMove || guestsTo) {
+    const amt = budgetMove ? parseAmountPaise(budgetMove[2]!) : null;
+    const down = budgetMove ? /dropped|drops|down|cut|reduced|reduce|lower|shrunk|fell|decreased|lost|lose|save/i.test(budgetMove[1]!) : false;
+    const rev = buildRevision(st, today, { ...(amt ? { budgetDeltaPaise: down ? -amt : amt } : {}), ...(shift !== null ? { shiftDays: shift } : {}), ...(guestsTo ? { guestCount: Number(guestsTo) } : {}) });
+    if (!rev.ok) return { mode: "offline", actions, reply: `I couldn't revise the plan: ${rev.reason}` };
+    const r = executeAgentTool("revise_plan", { ...(amt ? { budgetChangeRupees: Math.round((down ? -amt : amt) / 100) } : {}),
+      ...(shift !== null ? { shift: { amount: Math.abs(shift) % 7 === 0 ? Math.abs(shift) / 7 : Math.abs(shift), unit: Math.abs(shift) % 7 === 0 ? "weeks" : "days", direction: shift < 0 ? "earlier" : "later" } } : {}),
+      ...(guestsTo ? { guestCount: Number(guestsTo) } : {}) }, st, today);
+    actions.push(...r.actions);
+    const res = r.response as { ok: boolean; reason?: string; explain?: string[] };
+    return { mode: "offline", actions, reply: res.ok ? `I revised the plan rather than starting over. ${(res.explain ?? []).slice(0, 2).join(" ")} The card lists every trade-off: approve it to commit.` : `I couldn't revise the plan: ${res.reason}` };
+  }
+  // v6: "fix by my priorities", "we're over budget", "too pricey", or a cut with no category ("cut ₹50k").
+  const looseCut = /\b(cut|trim|save|reduce)\b/i.test(t) && AMOUNT_RE.test(t) && !findCategory(t.replace(AMOUNT_RE, " "));
+  if (/\b(fix|sort out|handle)\b.*\b(over ?budget|overrun|priorit)/i.test(t) || /\bover ?budget\b|\btoo (pricey|expensive)\b/i.test(t) || looseCut) {
+    if (looseCut) {
+      const amt = parseAmountPaise(t.match(AMOUNT_RE)![0])!;
+      const plan = planPriorityCut(st, amt);
+      if (!plan.cuts.length) return { mode: "offline", actions, reply: "Nothing outside your must-protect categories can be cut: it's committed or locked." };
+      const r = executeAgentTool("apply_plan_changes", { summary: `Cut ${rupees(amt - plan.shortfallPaise)} by your priorities`, commands: cutCommands(plan) }, st, today);
+      const explain = explainCut(plan, st);
+      for (const a of r.actions) if (a.kind === "batch") a.explain = explain;
+      actions.push(...r.actions);
+      return { mode: "offline", actions, reply: `Here's a ${rupees(amt - plan.shortfallPaise)} cut by your priorities, not an even trim: ${explain[0]}.` };
+    }
+    const fix = buildPriorityFix(st);
+    if (!fix.ok) return { mode: "offline", actions, reply: fix.reason };
+    const r = executeAgentTool("revise_plan", {}, st, today);
+    actions.push(...r.actions);
+    return { mode: "offline", actions, reply: `${fix.explain[0]} ${fix.explain[1] ?? ""} Approve the card to commit.`.trim() };
+  }
+
+  // Rebalance and total budget: deterministic ops, shown for approval.
+  if (/\brebalance\b/i.test(lower)) {
+    const head = st.event.totalBudgetPaise - st.budgetItems.reduce((a, b) => a + b.plannedPaise, 0);
+    const r = executeAgentTool("apply_plan_changes", { summary: "Rebalance planned envelopes to the total budget", commands: [{ op: "rebalance_budget", expectedHeadroomPaise: head }] }, st, today);
+    actions.push(...r.actions);
+    const res = r.response as { ok: boolean; reason?: string };
+    return { mode: "offline", actions, reply: res.ok ? (head === 0 ? "Planned already equals your total." : `Here's the rebalance: ${rupees(Math.abs(head))} ${head > 0 ? "spread across" : "trimmed from"} unlocked lines so planned matches the total. Approve it to commit.`) : `I couldn't rebalance: ${res.reason}` };
+  }
+  const totalMatch = t.match(/\b(?:set|change|make|raise|increase|lower|reduce)\s+(?:the\s+|my\s+)?total(?:\s+budget)?\s+(?:to|at)\s+(.+)$/i);
+  if (totalMatch && AMOUNT_RE.test(totalMatch[1]!)) {
+    const amt = parseAmountPaise(totalMatch[1]!.match(AMOUNT_RE)![0]);
+    if (amt !== null) {
+      const r = executeAgentTool("apply_plan_changes", { summary: `Total budget → ${rupees(amt)}`, commands: [{ op: "set_event_basics", totalBudgetPaise: amt }] }, st, today);
+      actions.push(...r.actions);
+      const res = r.response as { ok: boolean; reason?: string };
+      return { mode: "offline", actions, reply: res.ok ? `Total budget to ${rupees(amt)}: approve the card to commit it.` : `I couldn't change the total: ${res.reason}` };
+    }
+  }
 
   // Cold start: "Switch to / plan / create … birthday|wedding|mela"
   if (/\b(switch to|plan|create|new|start|organi[sz]e|set up)\b/i.test(t) && detectEventType(t) && !/\bmove|cut|reduce\b/i.test(t)) {
@@ -348,7 +463,7 @@ export function runOfflineAgent(st: AgentState, text: string, today: string): Ch
   const commands = clauses.map(c => parseClause(st, c)).filter((c): c is CommandInput => c !== null);
   if (commands.length) {
     const summary = commands.map(c => c.op === "adjust_budget" ? `${c.deltaPaise < 0 ? "Cut" : "Add"} ${rupees(Math.abs(c.deltaPaise))} ${c.deltaPaise < 0 ? "from" : "to"} ${c.category}`
-      : c.op === "move_sub_event" ? `Move the ${cap(c.subEvent)} to ${"date" in c.to ? c.to.date : cap(c.to.weekday)}` : c.op === "set_task_status" ? `Mark task done` : c.op).join("; ");
+      : c.op === "move_sub_event" ? `Move the ${(() => { try { return findSubEvent(st, c.subEvent).name; } catch { return cap(c.subEvent); } })()} to ${"date" in c.to ? c.to.date : cap(c.to.weekday)}` : c.op === "set_task_status" ? `Mark task done` : c.op).join("; ");
     const r = executeAgentTool("apply_plan_changes", { summary, commands }, st, today);
     actions.push(...r.actions);
     const res = r.response as { ok: boolean; tier?: number; reason?: string; log?: string[] };
@@ -382,7 +497,7 @@ export function runOfflineAgent(st: AgentState, text: string, today: string): Ch
   }
 
   return { mode: "offline", actions, reply:
-    "Offline demo mode understands: budget cuts/top-ups (\"cut ₹20k from decor\"), moves (\"move the Haldi to Friday\"), \"what's overdue?\", drafts (\"draft a sponsor pitch\"), and new plans (\"plan a 30th arcade birthday in Mumbai for ₹1.5L\"). Add a GEMINI_API_KEY for free-form chat." };
+    "Offline demo mode understands: budget cuts/top-ups (\"cut ₹20k from decor\"), moves (\"move the Haldi to Friday\"), \"what's overdue?\", ideas (\"give me decor ideas\"), \"rebalance to my total\", drafts (\"draft a sponsor pitch\"), and new plans (\"plan a 30th arcade birthday in Mumbai for ₹1.5L\"). Add a GEMINI_API_KEY for free-form chat." };
 }
 
 // ---------- Guest / Committee Concierge (offline) ----------

@@ -4,7 +4,7 @@ import { addDays, categoryMaxCuttable, daysBetween, plannedTotal, rupees, taskDu
 
 export type InsightKind =
   | "overdue_deposit" | "upcoming_deposit" | "envelope_breach" | "over_budget" | "urgent_task"
-  | "permit_risk" | "wishlist_unclaimed" | "rsvp_pending" | "sponsor_gap";
+  | "permit_risk" | "wishlist_unclaimed" | "rsvp_pending" | "sponsor_gap" | "blocked_task";
 export type Severity = "critical" | "warning" | "info";
 
 export type Insight = {
@@ -87,6 +87,30 @@ export function computePlanInsights(plan: EventPlan, today: string = todayIST())
     out.push({ id: `task:${t.id}`, kind: "urgent_task", severity: d < 0 ? "critical" : t.priority === "high" || d <= 3 ? "warning" : "info",
       title: t.title, detail: `${d < 0 ? `${-d}d overdue` : d === 0 ? "due today" : `due in ${d}d`} (${due}${seName(t.subEventId) ? `, ${Math.abs(t.dueOffsetDays)}d ${t.dueOffsetDays <= 0 ? "before" : "after"} ${seName(t.subEventId)}` : ""})`,
       refs: [t.id], date: due });
+  }
+
+  // v6: dependencies. A task waiting on another that is overdue, due within a week, or due after it is flagged (code, not the LLM).
+  for (const t of plan.tasks) {
+    if (t.status === "done" || !t.dependsOn.length) continue;
+    const due = taskDueDate(plan, t);
+    const dT = daysBetween(today, due);
+    const problems: { id: string; text: string; level: number }[] = [];
+    for (const depId of t.dependsOn) {
+      const d = plan.tasks.find(x => x.id === depId);
+      if (!d || d.status === "done") continue;
+      const dd = taskDueDate(plan, d);
+      const n = daysBetween(today, dd);
+      if (n < 0) problems.push({ id: d.id, text: `"${d.title}" is ${-n}d overdue`, level: 2 });
+      else if (dd > due) problems.push({ id: d.id, text: `"${d.title}" is due ${dd}, after this task's ${due}`, level: 2 });
+      else if (n <= 7) problems.push({ id: d.id, text: `"${d.title}" isn't done and is due ${n === 0 ? "today" : `in ${n}d`}`, level: 1 });
+    }
+    if (!problems.length) continue;
+    const worst = Math.max(...problems.map(p => p.level));
+    // A blocked task is always worth attention: critical when it is itself due within a week and its blocker is late.
+    const severity: Severity = worst === 2 && dT <= 7 ? "critical" : "warning";
+    out.push({ id: `blocked:${t.id}`, kind: "blocked_task", severity, title: `${t.title}: blocked`,
+      detail: `Waiting on ${problems.map(p => p.text).join("; ")} · this task is ${dT < 0 ? `${-dT}d overdue` : `due ${due} (in ${dT}d)`}`,
+      refs: [t.id, ...problems.map(p => p.id)], date: due });
   }
 
   // Archetype-specific alerts

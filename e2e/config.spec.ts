@@ -1,10 +1,12 @@
 import { expect, test } from "@playwright/test";
+import { skipWelcome } from "./helpers";
 
 // Configuration-driven templates, prompts and layouts, end to end.
 const pageErrors: string[] = [];
 test.beforeEach(async ({ page }) => {
   pageErrors.length = 0;
   page.on("pageerror", e => pageErrors.push(e.message));
+  await skipWelcome(page);
 });
 test.afterEach(() => { expect(pageErrors, "uncaught client-side exceptions").toEqual([]); });
 
@@ -29,6 +31,8 @@ test("the event switcher lists the registry and each template renders its config
     birthday: ["Birthday · Rohan turns 30 · Retro arcade · 80s neon", "Gift wishlist", "Party activity run-sheet"],
     community: ["Community · Sponsors & Permits", "Sponsor pipeline", "Municipal permits"],
   };
+  // The event-type card is on the Event page (the switcher stays in the header on every page).
+  await page.getByRole("navigation", { name: "Pages" }).getByRole("link", { name: "Event", exact: true }).click();
   for (const [id, texts] of Object.entries(want)) {
     await select.selectOption(id);
     for (const t of texts) await expect(page.getByText(t).first()).toBeVisible();

@@ -303,7 +303,18 @@ describe("shared guest links", () => {
       { op: "move_sub_event", subEvent: "haldi", to: { weekday: "friday" } },
       { op: "record_payment", budgetItemId: "b6", paymentId: "x", paidDate: TODAY },
       { op: "set_rsvp", guestId: "g1", subEvent: "haldi", answer: "yes", plannedPaise: 1 },
+      // The organizer's inline-edit ops are not on the guest allowlist either.
+      { op: "rename_event", title: "Hijacked" },
+      { op: "set_partner_names", partners: ["A", "B"] },
+      { op: "rename_entity", kind: "guest", id: "g1", name: "Someone else" },
+      { op: "rename_entity", kind: "sub_event", id: "s1", name: "Party" },
+      { op: "set_planned_amount", budgetItemId: "b1", plannedPaise: 0, expectedPaise: 8_000_000 },
     ]) assert.equal((await postGuestActions(p.eventId, inv.token, { commands: [c] }, IP)).status, 400, c.op);
+    // With or without a token.
+    assert.equal((await postGuestActions(p.eventId, null, { commands: [{ op: "rename_event", title: "Hijacked" }] }, IP)).status, 400);
+    const after = body<{ plan: AgentState }>(await getOrganizerEvent(p.eventId, p.organizerToken)).plan;
+    assert.equal(after.event.title, royalWedding.event.title);
+    assert.equal(after.budgetItems.find(b => b.id === "b1")!.plannedPaise, 8_000_000);
     assert.equal((await postGuestActions(p.eventId, inv.token, { commands: [], plan: royalWedding }, IP)).status, 400);
   });
   test("guests cannot impersonate another household or act without an invite", async () => {

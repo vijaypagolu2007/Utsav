@@ -77,6 +77,22 @@ export function loadStore(): Store {
   try { return parseStore(window.localStorage.getItem(STORAGE_KEY)); } catch { return defaultStore(); }
 }
 
+// ---------- first run ----------
+/** Set once the organiser has picked "Plan my event" or "Explore a sample" on the welcome screen. */
+export const ONBOARDING_KEY = "utsav_onboarding_v1";
+/**
+ * A first run is a browser with no saved plans that has never been past the welcome screen. Anyone with saved state
+ * (every existing user) goes straight to their plan, exactly as before.
+ */
+export function isFirstRun(): boolean {
+  if (typeof window === "undefined") return false;
+  try { return window.localStorage.getItem(STORAGE_KEY) === null && window.localStorage.getItem(ONBOARDING_KEY) !== "done"; } catch { return false; }
+}
+export function markOnboarded(): void {
+  if (typeof window === "undefined") return;
+  try { window.localStorage.setItem(ONBOARDING_KEY, "done"); } catch { /* storage full or blocked: the welcome may show again */ }
+}
+
 export function saveStore(s: Store): boolean {
   if (typeof window === "undefined") return false;
   try { window.localStorage.setItem(STORAGE_KEY, serializeStore(s)); return true; } catch { return false; }

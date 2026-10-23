@@ -39,9 +39,9 @@ export const royalWedding = AgentState.parse({
         { id: "p2", amountPaise: L(1.5), kind: "installment", dueDate: "2027-01-15" },
         { id: "p3", amountPaise: K(80), kind: "final", dueDate: "2027-03-01" },
       ] },
-    { id: "b7", category: "catering", label: "Muhurtham lunch (banana leaf)", subEventId: "s4", vendorId: "v3", plannedPaise: L(4.5), committedPaise: L(2),
+    { id: "b7", category: "catering", label: "Muhurtham lunch (banana leaf)", subEventId: "s4", vendorId: "v3", plannedPaise: L(4.5), committedPaise: L(2), basis: "per_guest", perGuestPaise: 1500_00,
       payments: [{ id: "p4", amountPaise: L(1), kind: "deposit", dueDate: "2026-10-15" }] },
-    { id: "b8", category: "catering", label: "Sangeet dinner", subEventId: "s3", vendorId: "v3", plannedPaise: L(1.5) },
+    { id: "b8", category: "catering", label: "Sangeet dinner", subEventId: "s3", vendorId: "v3", plannedPaise: L(1.5), basis: "per_guest", perGuestPaise: 500_00 },
     { id: "b9", category: "catering", label: "Reception dinner", subEventId: "s5", vendorId: "v3", plannedPaise: L(2.5), committedPaise: L(1),
       payments: [{ id: "p5", amountPaise: K(50), kind: "deposit", dueDate: "2026-10-28" }] },
     { id: "b10", category: "photo_video", label: "Candid + cinematic film", vendorId: "v4", plannedPaise: L(1.8), quotedPaise: L(2.2),
@@ -59,16 +59,25 @@ export const royalWedding = AgentState.parse({
     { id: "v1", name: "N Convention", category: "venue", phone: "+91 98480 00001", stage: "booked", rating: 4.6 },
     { id: "v2", name: "Petals & Pillars Decor", category: "decor", phone: "+91 98480 00002", stage: "booked", rating: 4.4 },
     { id: "v3", name: "Sri Annapurna Caterers", category: "catering", phone: "+91 98480 00003", email: "orders@annapurna.example", stage: "booked", rating: 4.7 },
-    { id: "v4", name: "Frame by Frame Studios", category: "photo_video", phone: "+91 98480 00004", stage: "negotiating", rating: 4.8,
-      quotes: [{ id: "q1", amountPaise: L(2.2), basis: "flat", receivedOn: "2026-10-05", notes: "Includes drone + same-day edit" }] },
+    { id: "v4", name: "Frame by Frame Studios", category: "photo_video", phone: "+91 98480 00004", stage: "negotiating", rating: 4.8, need: "photographer",
+      quotes: [{ id: "q1", amountPaise: L(2.2), basis: "flat", receivedOn: "2026-10-05", notes: "Includes drone + same-day edit", guestsCovered: 300,
+        inclusions: ["2 candid + 1 traditional photographer", "Cinematic film (5 min)", "Drone at the Muhurtham", "Same-day edit at the Reception"],
+        exclusions: ["Printed album", "Travel outside Hyderabad"], extraCharges: [{ label: "Printed album (40 pages)", amountPaise: K(18) }, { label: "Overtime after 11 PM, per hour", amountPaise: K(5) }],
+        openQuestions: ["Does it cover the Haldi and Mehendi, or only the main three?", "When are the edited photos delivered?"] }] },
     { id: "v5", name: "DJ Nikhil", category: "music", phone: "+91 98480 00005", stage: "booked", rating: 4.5 },
+    // v6: a second photography quote, so the vendor workspace shows a side-by-side comparison out of the box.
+    { id: "v6", name: "Lens & Light Co.", category: "photo_video", phone: "+91 98480 00006", stage: "quoted", rating: 4.5, need: "photographer",
+      quotes: [{ id: "q1", amountPaise: 600_00, basis: "per_guest", receivedOn: "2026-10-12", notes: "Per guest, minimum 250", guestsCovered: null,
+        inclusions: ["1 candid + 1 traditional photographer", "Edited photos in 3 weeks", "Highlights video (3 min)", "Printed album (30 pages)"],
+        exclusions: ["Drone", "Same-day edit"], extraCharges: [{ label: "Drone add-on", amountPaise: K(15) }, { label: "Travel and stay outside the city", amountPaise: null }],
+        openQuestions: ["Is the per-guest rate on invited or attending guests?", "Is GST included?"] }] },
   ],
   tasks: [
     { id: "k1", title: "Confirm Haldi florist", subEventId: "s1", vendorId: "v2", dueOffsetDays: -14, priority: "med" },
     { id: "k2", title: "Pay caterer deposit", subEventId: "s4", vendorId: "v3", dueOffsetDays: -151, priority: "high" },
     { id: "k3", title: "Book Muhurtham purohit", subEventId: "s4", dueOffsetDays: -140, priority: "high" },
     { id: "k4", title: "Finalise Sangeet choreographer", subEventId: "s3", dueOffsetDays: -131, priority: "med" },
-    { id: "k5", title: "Print wedding invitations", subEventId: "s4", dueOffsetDays: -120, priority: "med" },
+    { id: "k5", title: "Print wedding invitations", subEventId: "s4", dueOffsetDays: -120, priority: "med", dependsOn: ["k3"] },
     { id: "k6", title: "Mehendi artist trial", subEventId: "s2", dueOffsetDays: -30, priority: "low" },
     { id: "k7", title: "Book guest shuttles", subEventId: "s4", dueOffsetDays: -45, priority: "med" },
     { id: "k8", title: "Reception photo-booth vendor", subEventId: "s5", dueOffsetDays: -60, priority: "low" },
@@ -123,6 +132,8 @@ export const royalWedding = AgentState.parse({
     { id: "g17", householdId: "h8", name: "Vikram Kapoor", diet: [], rsvp: rsvp("--myn", W) },
     { id: "g18", householdId: "h8", name: "Neha Kapoor", diet: ["gluten-free"], rsvp: rsvp("--myn", W) },
   ],
+  // v6: what matters most to the couple: food and the hall are protected; decor and contingency give first.
+  priorities: { protect: ["catering", "venue"], cutFirst: ["decor", "misc"], level: "balanced" },
 });
 
 // ---------------------------------------------------------------- Birthday
@@ -168,7 +179,7 @@ export const arcadeBirthday = AgentState.parse({
   tasks: [
     { id: "bk1", title: "Send neon e-invites", subEventId: "bs2", dueOffsetDays: -49, priority: "high" },
     { id: "bk2", title: "Reserve arcade machines", subEventId: "bs2", dueOffsetDays: -60, priority: "high", status: "done", column: "done" },
-    { id: "bk3", title: "Confirm headcount with venue", subEventId: "bs2", dueOffsetDays: -41, priority: "med" },
+    { id: "bk3", title: "Confirm headcount with venue", subEventId: "bs2", dueOffsetDays: -41, priority: "med", dependsOn: ["bk1"] },
     { id: "bk4", title: "Order pixel-art cake", subEventId: "bs2", dueOffsetDays: -14, priority: "med" },
     { id: "bk5", title: "Build synthwave playlist", subEventId: "bs2", dueOffsetDays: -7, priority: "low", status: "doing", column: "doing" },
     { id: "bk6", title: "Rent LED dance floor", subEventId: "bs1", dueOffsetDays: -21, priority: "med" },
@@ -250,7 +261,7 @@ export const culturalFest = AgentState.parse({
     { id: "ck2", title: "Lock artist line-up", subEventId: "cs3", dueOffsetDays: -26, priority: "high" },
     { id: "ck3", title: "Collect sponsor logo files", subEventId: "cs2", dueOffsetDays: -20, priority: "med" },
     { id: "ck4", title: "Publish volunteer roster", subEventId: "cs1", dueOffsetDays: -13, priority: "med" },
-    { id: "ck5", title: "Print banners", subEventId: "cs2", dueOffsetDays: -10, priority: "low" },
+    { id: "ck5", title: "Print banners", subEventId: "cs2", dueOffsetDays: -10, priority: "low", dependsOn: ["ck3"] },
     { id: "ck6", title: "Book ambulance on standby", subEventId: "cs2", dueOffsetDays: -7, priority: "med" },
   ],
   timeline: [

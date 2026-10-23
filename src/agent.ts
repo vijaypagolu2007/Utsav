@@ -8,7 +8,35 @@ import { applyBatch, Batch, type BatchInput, type Diagnostics, type Role, rupees
 import { initializeEventPlan } from "./blueprint";
 import { computePlanDiff, type PlanDiff } from "./diff";
 import { computePlanInsights, type Insight } from "./insights";
-import { batchTier, type TrustTier } from "./trust";
+import { agentBatchTier, batchTier, type TrustTier } from "./trust";
+import { ideasReply, prepareIdeas, type IdeaDraftT, type Refine } from "./ideas";
+import { buildRevision, prioritiesDigest, type RevisionInput } from "./priorities";
+import { checklistFor, slotByKey } from "./config/vendor-checklist";
+
+/** v6: "revise, don't restart". The model passes what the user said; code computes the total, the dates and every cut. */
+export const RevisePlan = z.object({
+  budgetChangeRupees: z.number().int().min(-1_000_000_000).max(1_000_000_000).optional()
+    .describe("Change to the TOTAL budget in whole rupees, as the user said it: 'budget dropped by ₹50k' = -50000. The tool converts and computes the new total"),
+  shift: z.object({
+    amount: z.number().int().min(1).max(60),
+    unit: z.enum(["days", "weeks"]),
+    direction: z.enum(["earlier", "later"]),
+  }).optional().describe("Move every date: 'the event is 2 weeks earlier' = {amount: 2, unit: 'weeks', direction: 'earlier'}. The tool computes the dates"),
+  guestCount: z.number().int().min(1).max(100_000).optional().describe("New total guest count, if the user changed it"),
+  fixOverrun: z.boolean().default(true).describe("Fix any overrun by the organiser's priorities (cut-first, then flexible; never must-protect)"),
+});
+export type RevisePlanInput = z.input<typeof RevisePlan>;
+export function revisionInputOf(a: z.infer<typeof RevisePlan>): RevisionInput {
+  const days = a.shift ? a.shift.amount * (a.shift.unit === "weeks" ? 7 : 1) * (a.shift.direction === "earlier" ? -1 : 1) : undefined;
+  return { ...(a.budgetChangeRupees !== undefined ? { budgetDeltaPaise: a.budgetChangeRupees * 100 } : {}), ...(days !== undefined ? { shiftDays: days } : {}),
+    ...(a.guestCount !== undefined ? { guestCount: a.guestCount } : {}), fixOverrun: a.fixOverrun };
+}
+
+/** v6: questions to ask one kind of vendor (Gemini writes them; code checks the slot and the shape). */
+export const SuggestVendorQuestions = z.object({
+  need: z.string().min(1).max(40).describe("Vendor-checklist slot key, e.g. 'caterer', 'photographer'"),
+  questions: z.array(z.string().trim().min(8).max(220)).min(3).max(10).describe("5 to 8 specific questions to ask before booking: inclusions, guests covered, extra charges, timing, cancellation. Never state prices or availability"),
+});
 
 export const DraftOutboundMessage = z.object({
   channel: z.enum(["whatsapp", "email"]),
@@ -29,12 +57,18 @@ export type RejectionInfo = {
 export type AgentAction =
   | { kind: "batch"; id: string; batch: BatchInput; tier: TrustTier; log: string[]; diff: PlanDiff; counterOffer?: boolean;
       /** Set when the batch came from the quote scanner: contract red flags shown before approval. */
-      redFlags?: string[]; source?: string }
+      redFlags?: string[]; source?: string;
+      /** v6: plain-English trade-offs and knock-on effects, computed by code (priorities.ts), shown on the card. */
+      explain?: string[] }
+  /** v6: questions to ask one kind of vendor. Nothing in the plan changes. */
+  | { kind: "questions"; id: string; need: string; label: string; questions: string[]; source: "gemini" | "demo" }
   | { kind: "rejection"; id: string; batch: BatchInput; rejection: RejectionInfo }
   | { kind: "init"; id: string; plan: AgentState; log: string[] }
   | { kind: "init_rejection"; id: string; reason: string; issues: string[] }
   | { kind: "draft"; id: string; draft: DraftOutboundMessage }
-  | { kind: "insights"; id: string; insights: Insight[] };
+  | { kind: "insights"; id: string; insights: Insight[] }
+  /** Idea cards from suggest_ideas, already validated and converted by code; `batch` (add_ideas, Tier 0) puts them on the board. */
+  | { kind: "ideas"; id: string; ideas: IdeaDraftT[]; batch: BatchInput; source: "gemini" | "demo"; flagged: number; dropped: number };
 
 export type ChatTurn = { role: "user" | "assistant"; text: string };
 export type ChatRequest = { messages: ChatTurn[]; state: AgentState; today: string; forceOffline?: boolean;
@@ -53,7 +87,7 @@ const fmtCuttable = (d: Diagnostics) =>
  * Run one tool call against the working state. Returns what to send back to the model, the UI action
  * (if any), and the working state for any later call in the same turn (a dry-run assumes approval).
  */
-export function executeAgentTool(name: string, args: unknown, working: AgentState, today: string, role: Role = "organizer"):
+export function executeAgentTool(name: string, args: unknown, working: AgentState, today: string, role: Role = "organizer", ideaSource: "gemini" | "demo" = "gemini", opts: { refine?: Refine } = {}):
   { response: Record<string, unknown>; actions: AgentAction[]; working: AgentState } {
   if (role === "guest" && !GUEST_TOOLS.has(name))
     return { response: { ok: false, reason: `${name} isn't available in Guest mode` }, actions: [], working };
@@ -72,7 +106,7 @@ export function executeAgentTool(name: string, args: unknown, working: AgentStat
       const batch = (parsed.success ? parsed.data : args) as BatchInput;
       const r = applyBatch(working, args, { role });
       if (r.ok) {
-        const tier = batchTier(Batch.parse(args).commands);
+        const tier = agentBatchTier(Batch.parse(args).commands);
         const diff = computePlanDiff(working, r.state);
         return {
           response: { ok: true, tier, status: tier === 0 ? "auto-applied" : "dry-run preview shown; awaiting the user's Approve & Commit", log: r.log },
@@ -103,6 +137,46 @@ export function executeAgentTool(name: string, args: unknown, working: AgentStat
       return { response: { ok: true, status: "new plan shown; the user can load it with one click", log: r.log },
         actions: [{ kind: "init", id: nextId("in"), plan: r.state, log: r.log }], working: r.state };
     }
+    case "suggest_ideas": {
+      const prep = prepareIdeas(working, args, ideaSource, opts);
+      if (!prep.ok) return { response: { ok: false, reason: prep.reason }, actions: [], working };
+      const { drafts, dropped, flagged } = prep.value;
+      if (!drafts.length) return { response: { ok: true, added: 0, note: "All of those are already on the board; suggest different ones.", dropped }, actions: [], working };
+      const batch: BatchInput = { summary: `Add ${drafts.length} idea${drafts.length === 1 ? "" : "s"} to the board`, commands: [{ op: "add_ideas", ideas: drafts }] };
+      const r = applyBatch(working, batch, { role });
+      if (!r.ok) return { response: { ok: false, reason: r.reason }, actions: [], working };
+      return {
+        response: { ok: true, added: drafts.length, flaggedOverBudget: flagged, dropped, status: "Shown to the user as idea cards and saved on the Ideas page",
+          summary: ideasReply(prep.value, ideaSource) },
+        actions: [{ kind: "ideas", id: nextId("id"), ideas: drafts, batch, source: ideaSource, flagged, dropped: dropped.length }],
+        working: r.state,
+      };
+    }
+    case "revise_plan": {
+      if (role === "guest") return { response: { ok: false, reason: "Only the organiser can revise the plan" }, actions: [], working };
+      const p = RevisePlan.safeParse(args);
+      if (!p.success) return { response: { ok: false, reason: p.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("; ") }, actions: [], working };
+      const rev = buildRevision(working, today, revisionInputOf(p.data));
+      if (!rev.ok) return { response: { ok: false, reason: rev.reason }, actions: [], working };
+      const r = applyBatch(working, rev.batch);
+      if (!r.ok) return { response: { ok: false, reason: r.reason }, actions: [], working };
+      const tier = Math.max(1, batchTier(Batch.parse(rev.batch).commands)) as TrustTier;
+      return {
+        response: { ok: true, tier, status: "One approval card shown with the revision and its trade-offs. Explain it in plain words using `explain`; do not restate amounts you did not get from here.", explain: rev.explain, log: r.log },
+        actions: [{ kind: "batch", id: nextId("b"), batch: rev.batch, tier, log: r.log, diff: computePlanDiff(working, r.state), explain: rev.explain }],
+        working: r.state,
+      };
+    }
+    case "suggest_vendor_questions": {
+      if (role === "guest") return { response: { ok: false, reason: "Vendor questions are for the organiser" }, actions: [], working };
+      const p = SuggestVendorQuestions.safeParse(args);
+      if (!p.success) return { response: { ok: false, reason: p.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("; ") }, actions: [], working };
+      const slot = slotByKey(working, p.data.need);
+      if (!slot) return { response: { ok: false, reason: `"${p.data.need}" isn't a vendor slot for this event. Use one of: ${checklistFor(working).map(s => s.key).join(", ")}` }, actions: [], working };
+      const questions = [...new Set(p.data.questions.map(q => q.trim()))].slice(0, 10);
+      return { response: { ok: true, shown: questions.length, status: "Shown to the user as a copyable list" },
+        actions: [{ kind: "questions", id: nextId("q"), need: slot.key, label: slot.label, questions, source: ideaSource }], working };
+    }
     case "draft_outbound_message": {
       const p = DraftOutboundMessage.safeParse(args);
       if (!p.success) return { response: { ok: false, reason: p.error.issues.map(i => i.message).join("; ") }, actions: [], working };
@@ -132,7 +206,13 @@ export function summarizePlan(st: AgentState, today: string): string {
   const pays = st.budgetItems.flatMap(b => b.payments.filter(p => !p.paidDate).map(p => `${b.id}/${p.id} ${p.kind} ${rupees(p.amountPaise)} due ${p.dueDate}`));
   if (pays.length) lines.push(`UNPAID PAYMENTS: ${pays.join(" | ")}`);
   const due = (t: AgentState["tasks"][number]) => taskDueDate(st, t);
-  lines.push(`TASKS: ${st.tasks.map(t => `${t.id} "${t.title}" ${t.status} due ${due(t)}`).join(" | ")}`);
+  lines.push(`TASKS: ${st.tasks.map(t => `${t.id} "${t.title}" ${t.status} ${t.priority} due ${due(t)}${t.dependsOn.length ? ` after ${t.dependsOn.join("+")}` : ""}`).join(" | ")}`);
+  lines.push(`PRIORITIES: ${prioritiesDigest(st)}`);
+  const perGuest = st.budgetItems.filter(b => b.basis === "per_guest" && b.perGuestPaise);
+  if (perGuest.length) lines.push(`PER-GUEST LINES (rescale with guestCount): ${perGuest.map(b => `${b.id} ${rupees(b.perGuestPaise!)}/guest`).join(", ")}`);
+  if (st.vendors.length) lines.push(`VENDORS (id name category stage need quotes): ${st.vendors.map(v => `${v.id} "${v.name}" ${v.category} ${v.stage}${v.need ? ` ${v.need}` : ""} ${v.quotes.length}q`).join(" | ")}`);
+  const checklist = checklistFor(st).map(s => `${s.key}${st.vendorChecklist.notNeeded.includes(s.key) ? "(not needed)" : ""}`);
+  lines.push(`VENDOR CHECKLIST SLOTS: ${checklist.join(", ")}`);
   if (st.timeline.length) lines.push(`TIMELINE BLOCKS: ${st.timeline.map(b => `${b.id} ${b.label}@${b.subEventId} ${b.startMin}-${b.endMin}min lane ${b.lane}${b.anchored ? " ANCHORED" : ""}`).join(" | ")}`);
   if (st.guests.length) lines.push(`GUESTS: ${st.guests.slice(0, 60).map(g => `${g.id} ${g.name}`).join(", ")}`);
   const x = e.ext;

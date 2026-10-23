@@ -3,7 +3,8 @@ import type { EventPlan } from "./schema";
 import { rupees, taskDueDate } from "./commands";
 
 export type DiffRow = {
-  kind: "budget" | "budget_new" | "quote" | "vendor" | "diet" | "signup" | "sub_event" | "task_due" | "task_status" | "block" | "payment" | "rsvp" | "lock" | "wishlist" | "permit" | "sponsor" | "event";
+  kind: "budget" | "budget_new" | "quote" | "vendor" | "diet" | "signup" | "sub_event" | "task_due" | "task_status" | "block" | "payment" | "rsvp" | "lock" | "wishlist" | "permit" | "sponsor" | "event"
+    | "budget_removed" | "task_new" | "idea" | "basics" | "priorities" | "vendor_stage" | "checklist" | "task_dep";
   id: string;
   label: string;
   before: string;
@@ -28,8 +29,48 @@ export function computePlanDiff(before: EventPlan, after: EventPlan): PlanDiff {
     rows.push({ kind: "event", id: after.event.id, label: "Event", before: before.event.title, after: after.event.title });
     return { rows, changedIds: [], cascadedTasks: 0 };
   }
+  const eb0 = before.event, ea0 = after.event;
+  if (ea0.totalBudgetPaise !== eb0.totalBudgetPaise)
+    rows.push({ kind: "basics", id: "event-total", label: "Total budget", before: rupees(eb0.totalBudgetPaise), after: rupees(ea0.totalBudgetPaise), deltaPaise: ea0.totalBudgetPaise - eb0.totalBudgetPaise });
+  if (ea0.guestCount !== eb0.guestCount) rows.push({ kind: "basics", id: "event-guests", label: "Guest count", before: String(eb0.guestCount), after: String(ea0.guestCount) });
+  if (ea0.city !== eb0.city) rows.push({ kind: "basics", id: "event-city", label: "City", before: eb0.city || "—", after: ea0.city || "—" });
+  if (ea0.startDate !== eb0.startDate || ea0.endDate !== eb0.endDate)
+    rows.push({ kind: "basics", id: "event-window", label: "Event window", before: `${eb0.startDate} to ${eb0.endDate}`, after: `${ea0.startDate} to ${ea0.endDate}` });
+  for (const b of before.budgetItems) if (!after.budgetItems.some(x => x.id === b.id))
+    rows.push({ kind: "budget_removed", id: b.id, label: `${b.label} (removed)`, before: `planned ${rupees(b.plannedPaise)}`, after: "—", deltaPaise: -b.plannedPaise });
+  for (const t of after.tasks) if (!before.tasks.some(x => x.id === t.id))
+    rows.push({ kind: "task_new", id: t.id, label: `${t.title} (new task)`, before: "—", after: `due ${taskDueDate(after, t)}` });
+  const ideasAdded = after.ideas.filter(i => !before.ideas.some(x => x.id === i.id));
+  if (ideasAdded.length) rows.push({ kind: "idea", id: ideasAdded[0]!.id, label: "Ideas board", before: `${before.ideas.length} idea${before.ideas.length === 1 ? "" : "s"}`, after: `+${ideasAdded.length} new` });
+  for (const i of after.ideas) {
+    const o = before.ideas.find(x => x.id === i.id);
+    if (!o) continue;
+    // Adopting an idea (even one already saved) reads as "added to plan", not as a bare status change.
+    const adoptedNow = !!(i.adoptedTaskId || i.adoptedBudgetItemId) && !(o.adoptedTaskId || o.adoptedBudgetItemId);
+    if (adoptedNow || o.status !== i.status) rows.push({ kind: "idea", id: i.id, label: `Idea: ${i.title}`, before: o.status, after: adoptedNow ? "added to plan" : i.status });
+  }
   for (const v of after.vendors) if (!before.vendors.some(x => x.id === v.id))
     rows.push({ kind: "vendor", id: v.id, label: `Vendor ${v.name}`, before: "—", after: `added · ${v.category}` });
+  // v6: vendors removed or moved along the pipeline, checklist slots, priorities and task dependencies.
+  for (const v of before.vendors) if (!after.vendors.some(x => x.id === v.id))
+    rows.push({ kind: "vendor", id: v.id, label: `Vendor ${v.name} (removed)`, before: v.stage, after: "—" });
+  for (const v of after.vendors) {
+    const o = before.vendors.find(x => x.id === v.id);
+    if (o && o.stage !== v.stage) rows.push({ kind: "vendor_stage", id: v.id, label: `${v.name} stage`, before: o.stage, after: v.stage });
+  }
+  const offB = new Set(before.vendorChecklist.notNeeded), offA = new Set(after.vendorChecklist.notNeeded);
+  for (const k of new Set([...offB, ...offA])) if (offB.has(k) !== offA.has(k))
+    rows.push({ kind: "checklist", id: `need-${k}`, label: `Vendor checklist: ${k.replace(/_/g, " ")}`, before: offB.has(k) ? "not needed" : "needed", after: offA.has(k) ? "not needed" : "needed" });
+  const pb = before.priorities, pa = after.priorities;
+  const ptxt = (p: typeof pa) => `protect ${p.protect.join(", ") || "none"} · cut first ${p.cutFirst.join(", ") || "none"} · ${p.level}`;
+  if (ptxt(pb) !== ptxt(pa)) rows.push({ kind: "priorities", id: "priorities", label: "Priorities", before: ptxt(pb), after: ptxt(pa) });
+  for (const t of after.tasks) {
+    const o = before.tasks.find(x => x.id === t.id);
+    if (o && o.dependsOn.join() !== t.dependsOn.join()) {
+      const nm = (ids: string[]) => ids.map(id => after.tasks.find(x => x.id === id)?.title ?? id).join(", ") || "nothing";
+      rows.push({ kind: "task_dep", id: t.id, label: `${t.title} waits for`, before: nm(o.dependsOn), after: nm(t.dependsOn) });
+    }
+  }
   for (const a of after.budgetItems) {
     const b = before.budgetItems.find(x => x.id === a.id);
     if (!b) {

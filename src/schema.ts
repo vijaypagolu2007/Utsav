@@ -82,6 +82,8 @@ export const Event = z.looseObject({
   startDate: IsoDate,
   endDate: IsoDate,
   utcOffsetMin: z.number().int().nullable().default(null),
+  /** The organiser's "anything special" note from setup (traditions, theme, must-haves). Feeds personalised ideas. */
+  notes: z.string().max(1000).default(""),
   ext: EventExt,
 });
 
@@ -121,17 +123,36 @@ export const BudgetItem = z.looseObject({
   /** Terms pulled from the latest vendor quote (cancellation, corkage, overtime). */
   quoteNotes: z.string().default(""),
   quoteRedFlags: z.array(z.string()).default([]),
+  /** v6: "flat" (one amount) or "per_guest" (rescaled in code when the guest count changes). Legacy lines are flat. */
+  basis: z.enum(["flat", "per_guest"]).default("flat"),
+  /** v6: the per-guest rate in paise for a per_guest line. A guest-count change moves plannedPaise by rate × (new − old). */
+  perGuestPaise: Money.nullable().default(null),
 });
 
+export const VendorStage = z.enum(["shortlisted", "contacted", "quoted", "negotiating", "booked", "dropped"]);
+export const QuoteBasis = z.enum(["flat", "per_guest", "per_hour"]);
+/** One extra charge a quote names ("Generator backup", "Overtime per hour"). The amount is null when the quote doesn't say. */
+export const ExtraCharge = z.looseObject({ label: z.string().min(1).max(120), amountPaise: Money.nullable().default(null) });
+export const VendorQuote = z.looseObject({
+  id: Id, amountPaise: Money, basis: QuoteBasis,
+  receivedOn: IsoDate, notes: z.string().default(""),
+  // v6 structured comparison fields. Defaults keep quotes saved before v6 valid.
+  inclusions: z.array(z.string().max(160)).max(30).default([]),
+  exclusions: z.array(z.string().max(160)).max(30).default([]),
+  extraCharges: z.array(ExtraCharge).max(20).default([]),
+  /** Guests the quoted amount covers (a flat package for 300); null when the quote doesn't say. */
+  guestsCovered: z.number().int().positive().nullable().default(null),
+  /** Things still to clarify with the vendor before booking. */
+  openQuestions: z.array(z.string().max(200)).max(20).default([]),
+});
 export const Vendor = z.looseObject({
   id: Id, name: z.string(), category: BudgetItem.shape.category,
   phone: z.string().default(""), email: z.string().default(""),
-  stage: z.enum(["shortlisted", "contacted", "quoted", "negotiating", "booked", "dropped"]).default("shortlisted"),
-  quotes: z.array(z.looseObject({
-    id: Id, amountPaise: Money, basis: z.enum(["flat", "per_guest", "per_hour"]),
-    receivedOn: IsoDate, notes: z.string().default(""),
-  })).default([]),
+  stage: VendorStage.default("shortlisted"),
+  quotes: z.array(VendorQuote).default([]),
   rating: z.number().min(0).max(5).nullable().default(null),
+  /** v6: the vendor-checklist slot this vendor is for ("photographer", "mehendi_artist"); null = matched by category. */
+  need: z.string().max(40).nullable().default(null),
 });
 
 export const Task = z.looseObject({
@@ -143,6 +164,8 @@ export const Task = z.looseObject({
   status: TaskStatus.default("todo"),
   priority: Priority.default("med"),
   column: z.string().default("todo"), // kanban lane
+  /** v6: ids of tasks that must be done first (venue booking before decor). Default [] so legacy tasks parse. */
+  dependsOn: z.array(Id).max(20).default([]),
 });
 
 export const TimelineBlock = z.looseObject({
@@ -170,6 +193,46 @@ export const Guest = z.looseObject({
   rsvp: z.record(Id, RsvpStatus).default({}),
 });
 
+// ---------- Ideas: personalised suggestions (theme, decor, menu, ...) the organiser can save, dismiss or adopt ----------
+export const IdeaKind = z.enum(["theme", "decor", "menu", "activity", "return_gift", "invite_text", "music", "photo"]);
+export const IdeaStatus = z.enum(["new", "saved", "dismissed"]);
+export const Idea = z.looseObject({
+  id: Id,
+  kind: IdeaKind,
+  title: z.string().min(1).max(120),
+  description: z.string().max(400).default(""),
+  /** Estimated cost range in paise (converted from rupees by code, never by the LLM). Both null when there's no cost. */
+  estLowPaise: Money.nullable().default(null),
+  estHighPaise: Money.nullable().default(null),
+  category: BudgetItem.shape.category.nullable().default(null),
+  tags: z.array(z.string().max(40)).max(8).default([]),
+  status: IdeaStatus.default("new"),
+  /** Where it came from: live Gemini or the offline curated bank. */
+  source: z.enum(["gemini", "demo"]).default("demo"),
+  /** Set when the low estimate was above the category's headroom at the time it was suggested. */
+  overBudget: z.boolean().default(false),
+  /** What adopt_idea created from it (task and/or budget line ids). */
+  adoptedTaskId: Id.nullable().default(null),
+  adoptedBudgetItemId: Id.nullable().default(null),
+  /** v6: set on a refinement ("cheaper alternative", "kid-friendly", "more traditional"): the idea it came from. */
+  refinedFrom: Id.nullable().default(null),
+});
+
+// ---------- v6: the organiser's priorities: which budget categories to protect, which to cut first, and how lavish ----------
+export const ExperienceLevel = z.enum(["simple", "balanced", "premium"]);
+export const PriorityTier = z.enum(["protect", "flexible", "cut_first"]);
+export const Priorities = z.looseObject({
+  /** Must-protect categories, most important first. Overrun fixes never take from these. */
+  protect: z.array(BudgetItem.shape.category).max(13).default([]),
+  /** Cut-first categories, the first to give when money is short. Every other category is flexible. */
+  cutFirst: z.array(BudgetItem.shape.category).max(13).default([]),
+  level: ExperienceLevel.default("balanced"),
+});
+export const DEFAULT_PRIORITIES = { protect: [], cutFirst: [], level: "balanced" } as const;
+
+// ---------- v6: vendor checklist state the organiser sets (which checklist slots aren't needed) ----------
+export const VendorChecklistState = z.looseObject({ notNeeded: z.array(z.string().max(40)).max(40).default([]) });
+
 export const AgentState = z.looseObject({
   version: z.literal(1).default(1),
   event: Event,
@@ -180,6 +243,11 @@ export const AgentState = z.looseObject({
   vendors: z.array(Vendor).default([]),
   households: z.array(Household).default([]),
   guests: z.array(Guest).default([]),
+  /** Organizer-only idea board. Default [] so plans saved before ideas existed still parse. Never in the guest projection. */
+  ideas: z.array(Idea).max(200).default([]),
+  /** v6: organiser-only. Defaults so plans saved before v6 still parse. Never in the guest projection. */
+  priorities: Priorities.default({ protect: [], cutFirst: [], level: "balanced" }),
+  vendorChecklist: VendorChecklistState.default({ notNeeded: [] }),
 });
 
 export type AgentState = z.infer<typeof AgentState>;
@@ -193,6 +261,9 @@ export type Guest = z.infer<typeof Guest>;
 export type Household = z.infer<typeof Household>;
 export type Vendor = z.infer<typeof Vendor>;
 export type EventExt = z.infer<typeof EventExt>;
+export type Idea = z.infer<typeof Idea>;
+export type IdeaKind = z.infer<typeof IdeaKind>;
+export type IdeaStatus = z.infer<typeof IdeaStatus>;
 export type BudgetCategory = BudgetItem["category"];
 export type EventType = z.infer<typeof EventType>;
 export type Priority = z.infer<typeof Priority>;
@@ -202,3 +273,8 @@ export type SponsorTier = z.infer<typeof SponsorTier>;
 export type SponsorStatus = z.infer<typeof SponsorStatus>;
 export type PermitStatus = z.infer<typeof PermitStatus>;
 export const BUDGET_CATEGORIES = BudgetItem.shape.category.options;
+export type Priorities = z.infer<typeof Priorities>;
+export type ExperienceLevel = z.infer<typeof ExperienceLevel>;
+export type PriorityTier = z.infer<typeof PriorityTier>;
+export type VendorQuote = z.infer<typeof VendorQuote>;
+export type VendorStage = z.infer<typeof VendorStage>;

@@ -2,73 +2,183 @@
 // The event-type card: a generic frame that renders the sections the active template's layout lists
 // (config/event-templates.ts). Each section is an ordinary component keyed by its id; configuration only picks and
 // arranges them, so a new template reuses these instead of needing a fourth hand-built layout.
-import type { ComponentType, ReactNode } from "react";
-import { Building2, Cake, Gift, Handshake, Heart, Megaphone, ShieldCheck, Sparkles, Timer, Users } from "lucide-react";
+import { useRef, type ComponentType, type ReactNode } from "react";
+import { Building2, Cake, Check, ChevronDown, CircleHelp, Gift, Handshake, Heart, Megaphone, ShieldCheck, Sparkles, Timer, Users, X } from "lucide-react";
 import type { AgentState, SponsorTier } from "@/schema";
 import { daysBetween } from "@/commands";
 import type { Commit, Highlight } from "./PlannerApp";
-import { Badge, Card, Empty, inr, priorityTone, relDays, useHighlight, type Tone } from "./ui";
+import { refAnchor } from "@/routes";
+import { Badge, Card, Empty, InlineEdit, inr, longDate, priorityTone, relDays, saveWith, useElementWidth, useHighlight, type Tone } from "./ui";
 import { sponsorProgress } from "@/budget-a11y";
 import { formatTokens, templateTokens, type EventTemplate, type OrganizerSectionId } from "@/config/event-templates";
-import { labelOf, PERMIT_STATUS_OPTIONS, RSVP_CYCLE, RSVP_LABELS, SPONSOR_STATUS_OPTIONS, SPONSOR_TIER_OPTIONS } from "@/config/planner-options";
+import { GUEST_RSVP_ANSWERS, labelOf, PERMIT_STATUS_OPTIONS, RSVP_CYCLE, RSVP_LABELS, SPONSOR_STATUS_OPTIONS, SPONSOR_TIER_OPTIONS } from "@/config/planner-options";
 
 type SectionProps = { plan: AgentState; today: string; commit: Commit; highlight: Highlight; onAsk: (text: string) => void };
 type Props = SectionProps & { template: EventTemplate };
 const RSVP_STYLE: Record<string, string> = {
-  yes: "bg-emerald-700 text-white", no: "bg-rose-100 text-rose-800", maybe: "bg-amber-100 text-amber-900", invited: "bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-300",
+  yes: "bg-emerald-700 text-white", no: "bg-red-100 text-red-800 ring-1 ring-inset ring-red-300", maybe: "bg-amber-100 text-amber-900 ring-1 ring-inset ring-amber-300", invited: "bg-sand-100 text-sand-700 ring-1 ring-inset ring-sand-400",
 };
+// Each answer has an icon as well as a colour and a word.
+const RSVP_ICON: Record<string, ReactNode> = { yes: <Check size={13} />, no: <X size={13} />, maybe: <CircleHelp size={13} />, invited: null };
+const ANSWER_ON: Record<string, string> = { yes: "bg-emerald-700 text-white ring-emerald-700", maybe: "bg-amber-700 text-white ring-amber-700", no: "bg-red-700 text-white ring-red-700" };
+/** The matrix needs about this much room; narrower containers (phones, the 1280px side column) get household cards. */
+const MATRIX_MIN_PX = 600;
 
-/** Per-guest, per-sub-event RSVP grid with tallies. Reads only guests and sub-events, so any event type can use it. */
-function RsvpMatrix({ plan, commit, highlight }: SectionProps) {
-  const hl = useHighlight(highlight);
+/**
+ * Per-guest, per-sub-event RSVPs with tallies. Reads only guests and sub-events, so any event type can use it.
+ * Wide containers get the matrix (one click cycles an answer); narrow ones get one collapsible card per household
+ * with 44px Yes / Maybe / No buttons. Only one variant is rendered at a time; both send the same set_rsvp command.
+ */
+type Commit_ = SectionProps["commit"];
+const renameGuest = (commit: Commit_, g: { id: string; name: string }) => (name: string) =>
+  saveWith(commit, { summary: `Rename guest ${g.name}`, commands: [{ op: "rename_entity", kind: "guest", id: g.id, name }] });
+const renameHousehold = (commit: Commit_, h: { id: string; label: string }) => (name: string) =>
+  saveWith(commit, { summary: `Rename household ${h.label}`, commands: [{ op: "rename_entity", kind: "household", id: h.id, name }] });
+
+function RsvpMatrix(props: SectionProps) {
+  const { plan } = props;
+  const box = useRef<HTMLDivElement>(null);
+  const width = useElementWidth(box);
   const subs = plan.subEvents.filter(s => s.collectsRsvp).sort((a, b) => a.date.localeCompare(b.date));
-  const tally = (sid: string, v: string) => plan.guests.filter(g => g.rsvp[sid] === v).length;
+  return (
+    <div ref={box} className="min-w-0">
+      {plan.guests.length === 0 ? <Empty>No guests yet. The plan is sized for {plan.event.guestCount} guests.</Empty>
+        : width !== null && width < MATRIX_MIN_PX ? <RsvpHouseholds {...props} subs={subs} /> : <RsvpTable {...props} subs={subs} />}
+    </div>
+  );
+}
+
+type Sub = AgentState["subEvents"][number];
+const tally = (plan: AgentState, sid: string, v: string) => plan.guests.filter(g => g.rsvp[sid] === v).length;
+
+function RsvpTable({ plan, commit, highlight, subs }: SectionProps & { subs: Sub[] }) {
+  const hl = useHighlight(highlight);
   const label = (v: keyof typeof RSVP_LABELS) => RSVP_LABELS[v];
   return (
     /* relative: absolutely-positioned sr-only text inside must be clipped by this scroller, not widen the page. */
     <div className="relative min-w-0 overflow-x-auto">
-      {plan.guests.length === 0 ? <Empty>No guests yet. The plan is sized for {plan.event.guestCount} guests.</Empty> : (
-          <table className="w-full min-w-[36rem] border-separate border-spacing-y-0.5 text-xs">
-            <thead>
-              <tr className="text-left text-[10px] uppercase tracking-wide text-slate-600">
-                <th scope="col" className="py-1 pr-2 font-medium">Household · guest</th>
-                {subs.map(s => <th scope="col" key={s.id} className="px-1 py-1 text-center font-medium">{s.name}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {plan.households.map(h => {
-                const gs = plan.guests.filter(g => g.householdId === h.id);
-                if (!gs.length) return null;
-                return [
-                  <tr key={h.id}><td colSpan={subs.length + 1} className="pt-2 text-[11px] font-semibold text-slate-700">{h.label} <span className="font-normal text-slate-600">· {h.side}</span></td></tr>,
-                  ...gs.map(g => (
-                    <tr key={g.id} className={hl(g.id)}>
-                      <th scope="row" className="py-0.5 pr-2 text-left font-normal text-slate-700">{g.name}{g.ageGroup !== "adult" && <span className="text-slate-600"> ({g.ageGroup})</span>}{g.diet.length > 0 && <span className="ml-1 text-[10px] text-slate-600">{g.diet.join(", ")}</span>}</th>
-                      {subs.map(s => {
-                        const v = g.rsvp[s.id];
-                        return (
-                          <td key={s.id} className="px-1 py-0.5 text-center">
-                            {v ? (
-                              <button type="button" onClick={() => commit({ summary: `${g.name} · ${s.name}: ${RSVP_CYCLE[v]}`, commands: [{ op: "set_rsvp", guestId: g.id, subEvent: s.slug, answer: RSVP_CYCLE[v] }] })}
-                                title={`Click to change to ${label(RSVP_CYCLE[v])}`}
-                                className={`min-h-6 w-14 rounded-md py-0.5 text-[10px] font-semibold capitalize ${RSVP_STYLE[v]}`}>{label(v)}<span className="sr-only">: {g.name}, {s.name}. Activate to change to {label(RSVP_CYCLE[v])}</span></button>
-                            ) : <><span aria-hidden="true" className="text-slate-500">—</span><span className="sr-only">not invited</span></>}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  )),
-                ];
-              })}
-            </tbody>
-            <tfoot>
-              <tr className="text-[10px] text-slate-600">
-                <th scope="row" className="pt-2 text-left font-semibold">Yes / No / Maybe / Pending</th>
-                {subs.map(s => <td key={s.id} className="pt-2 text-center tabular-nums"><span className="text-emerald-800">{tally(s.id, "yes")}</span>/{tally(s.id, "no")}/{tally(s.id, "maybe")}/{tally(s.id, "invited")}</td>)}
-              </tr>
-            </tfoot>
-          </table>
-        )}
+      <table className="w-full min-w-[36rem] border-separate border-spacing-y-1 text-sm">
+        <thead>
+          <tr className="text-left text-xs font-semibold uppercase tracking-wide text-ink-muted">
+            <th scope="col" className="py-1 pr-2">Household · guest</th>
+            {subs.map(s => <th scope="col" key={s.id} className="px-1 py-1 text-center">{s.name}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {plan.households.map(h => {
+            const gs = plan.guests.filter(g => g.householdId === h.id);
+            if (!gs.length) return null;
+            return [
+              <tr key={h.id}><td colSpan={subs.length + 1} className="pt-3 text-sm font-semibold text-ink">
+                <InlineEdit label={`household name ${h.label}`} value={h.label} onSave={renameHousehold(commit, h)}>
+                  <span>{h.label} <span className="font-normal text-ink-muted">· {h.side}</span></span>
+                </InlineEdit>
+              </td></tr>,
+              ...gs.map(g => (
+                <tr key={g.id} id={refAnchor(g.id)} className={hl(g.id)}>
+                  <th scope="row" className="py-0.5 pr-2 text-left font-normal text-sand-800">
+                    <InlineEdit label={`guest name ${g.name}`} value={g.name} inputSize="w-44" onSave={renameGuest(commit, g)}>
+                      <span>{g.name}{g.ageGroup !== "adult" && <span className="text-ink-muted"> ({g.ageGroup})</span>}{g.diet.length > 0 && <span className="ml-1 text-xs text-ink-muted">{g.diet.join(", ")}</span>}</span>
+                    </InlineEdit>
+                  </th>
+                  {subs.map(s => {
+                    const v = g.rsvp[s.id];
+                    return (
+                      <td key={s.id} className="px-1 py-0.5 text-center">
+                        {v ? (
+                          <button type="button" onClick={() => commit({ summary: `${g.name} · ${s.name}: ${RSVP_CYCLE[v]}`, commands: [{ op: "set_rsvp", guestId: g.id, subEvent: s.slug, answer: RSVP_CYCLE[v] }] })}
+                            title={`Click to change to ${label(RSVP_CYCLE[v])}`}
+                            className={`inline-flex min-h-8 w-20 items-center justify-center gap-1 rounded-md px-1 text-xs font-semibold capitalize ${RSVP_STYLE[v]}`}><span aria-hidden="true">{RSVP_ICON[v]}</span>{label(v)}<span className="sr-only">: {g.name}, {s.name}. Activate to change to {label(RSVP_CYCLE[v])}</span></button>
+                        ) : <><span aria-hidden="true" className="text-ink-muted">—</span><span className="sr-only">not invited</span></>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              )),
+            ];
+          })}
+        </tbody>
+        <tfoot>
+          <tr className="text-xs text-ink-muted">
+            <th scope="row" className="pt-3 text-left font-semibold">Yes / No / Maybe / Pending</th>
+            {subs.map(s => <td key={s.id} className="pt-3 text-center tabular-nums"><span className="font-semibold text-emerald-800">{tally(plan, s.id, "yes")}</span>/{tally(plan, s.id, "no")}/{tally(plan, s.id, "maybe")}/{tally(plan, s.id, "invited")}</td>)}
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  );
+}
+
+function RsvpHouseholds({ plan, commit, highlight, subs }: SectionProps & { subs: Sub[] }) {
+  const hl = useHighlight(highlight);
+  return (
+    <div className="space-y-3">
+      <ul aria-label="RSVP totals" className="grid gap-1.5 text-sm tabular-nums">
+        {subs.map(s => (
+          <li key={s.id} className="flex flex-wrap items-baseline justify-between gap-x-3 rounded-lg bg-surface-muted px-3 py-1.5">
+            <span className="font-medium text-ink">{s.name}</span>
+            <span className="text-ink-muted"><span className="font-semibold text-emerald-800">{tally(plan, s.id, "yes")} yes</span> · {tally(plan, s.id, "no")} no · {tally(plan, s.id, "maybe")} maybe · {tally(plan, s.id, "invited")} pending</span>
+          </li>
+        ))}
+      </ul>
+      {plan.households.map(h => {
+        const gs = plan.guests.filter(g => g.householdId === h.id);
+        if (!gs.length) return null;
+        const pending = gs.reduce((n, g) => n + subs.filter(s => g.rsvp[s.id] === "invited" || g.rsvp[s.id] === "maybe").length, 0);
+        return (
+          <details key={h.id} className="group rounded-xl border border-line">
+            <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 rounded-xl px-3 py-2 hover:bg-sand-50 [&::-webkit-details-marker]:hidden">
+              <ChevronDown size={18} aria-hidden="true" className="shrink-0 text-sand-600 transition-transform group-open:rotate-180" />
+              <span className="min-w-0 flex-1"><span className="block text-base font-semibold text-ink">{h.label}</span>
+                <span className="block text-sm text-ink-muted">{h.side} · {gs.length} guest{gs.length > 1 ? "s" : ""}</span></span>
+              {pending > 0 ? <Badge tone="warning">{pending} to confirm</Badge> : <Badge tone="success"><Check size={12} aria-hidden="true" />All answered</Badge>}
+            </summary>
+            <div className="space-y-4 border-t border-line-soft px-3 py-3">
+              {/* Controls can't live inside <summary>, so the household's rename sits at the top of its panel. */}
+              <InlineEdit label={`household name ${h.label}`} value={h.label} onSave={renameHousehold(commit, h)}>
+                <span className="text-sm text-ink-muted">Household: <span className="font-medium text-ink">{h.label}</span></span>
+              </InlineEdit>
+              {gs.map(g => (
+                <div key={g.id} id={refAnchor(g.id)} className={hl(g.id)}>
+                  <InlineEdit label={`guest name ${g.name}`} value={g.name} onSave={renameGuest(commit, g)}>
+                    <p className="text-base font-medium text-ink">{g.name}{g.ageGroup !== "adult" && <span className="font-normal text-ink-muted"> ({g.ageGroup})</span>}</p>
+                  </InlineEdit>
+                  {g.diet.length > 0 && <p className="text-sm text-ink-muted">{g.diet.join(", ")}</p>}
+                  <ul className="mt-2 space-y-2">
+                    {subs.filter(s => g.rsvp[s.id]).map(s => {
+                      const v = g.rsvp[s.id]!;
+                      return (
+                        <li key={s.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+                          <span className="text-sm text-sand-800">{s.name}{v === "invited" && <span className="text-ink-muted"> · pending</span>}</span>
+                          <span role="group" aria-label={`${g.name}, ${s.name}`} className="flex gap-1.5">
+                            {GUEST_RSVP_ANSWERS.map(a => (
+                              <button key={a} type="button" aria-pressed={v === a}
+                                onClick={() => commit({ summary: `${g.name} · ${s.name}: ${a}`, commands: [{ op: "set_rsvp", guestId: g.id, subEvent: s.slug, answer: a }] })}
+                                className={`flex min-h-11 min-w-11 items-center justify-center gap-1 rounded-lg px-2.5 text-sm font-semibold capitalize ring-1 ring-inset ${v === a ? ANSWER_ON[a] : "bg-surface text-sand-800 ring-sand-400 hover:bg-sand-100"}`}>
+                                {v === a && <Check size={14} aria-hidden="true" />}{RSVP_LABELS[a]}
+                              </button>
+                            ))}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </details>
+        );
+      })}
+    </div>
+  );
+}
+
+const sel = "min-h-9 rounded-lg border border-line-strong bg-surface px-2 text-sm text-ink max-md:min-h-11 pointer-coarse:min-h-11";
+function SubHead({ icon, children, right }: { icon: ReactNode; children: ReactNode; right?: ReactNode }) {
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+      <h3 className="flex items-center gap-2 text-base font-semibold text-ink"><span aria-hidden="true">{icon}</span>{children}</h3>
+      {right && <span className="ml-auto text-sm tabular-nums text-ink-muted">{right}</span>}
     </div>
   );
 }
@@ -78,10 +188,10 @@ function CoupleProfile({ plan }: SectionProps) {
   const ext = plan.event.ext;
   if (ext.type !== "wedding") return null;
   return (
-    <div className="rounded-xl bg-gradient-to-br from-rose-50 to-amber-50 p-3 ring-1 ring-rose-100">
-      <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-700"><Heart size={13} /> {ext.partners.filter(Boolean).join(" & ") || "Partners"}</div>
-      <div className="mt-2 flex flex-wrap gap-1">{ext.traditions.map(t => <Badge key={t} tone="rose">{t}</Badge>)}</div>
-      {ext.rsvpDeadline && <div className="mt-2 text-[11px] text-slate-600">RSVP deadline <b>{ext.rsvpDeadline}</b></div>}
+    <div className="rounded-xl bg-gradient-to-br from-maroon-50 to-marigold-50 p-4 ring-1 ring-inset ring-maroon-200">
+      <h3 className="flex items-center gap-2 text-base font-semibold text-maroon-800"><Heart size={16} aria-hidden="true" /> {ext.partners.filter(Boolean).join(" & ") || "Partners"}</h3>
+      <div className="mt-2 flex flex-wrap gap-1.5">{ext.traditions.map(t => <Badge key={t} tone="secondary">{t}</Badge>)}</div>
+      {ext.rsvpDeadline && <p className="mt-2 text-sm tabular-nums text-sand-700">RSVP deadline <b>{longDate(ext.rsvpDeadline)}</b></p>}
     </div>
   );
 }
@@ -92,10 +202,10 @@ function DietSummary({ plan }: SectionProps) {
   const diets = new Map<string, number>();
   for (const g of plan.guests) if (main && g.rsvp[main.id] === "yes") for (const d of g.diet.length ? g.diet : ["no restriction"]) diets.set(d, (diets.get(d) ?? 0) + 1);
   return (
-    <div className="rounded-xl p-3 ring-1 ring-slate-100">
-      <div className="mb-1.5 text-xs font-semibold text-slate-700">Dietary counts · {main?.name ?? "main"} (yes)</div>
-      {diets.size === 0 ? <p className="text-[11px] text-slate-600">No confirmations yet.</p> :
-        <ul className="space-y-0.5 text-[11px]">{[...diets].sort((a, b) => b[1] - a[1]).map(([d, n]) => <li key={d} className="flex justify-between"><span className="capitalize text-slate-600">{d}</span><b className="tabular-nums">{n}</b></li>)}</ul>}
+    <div className="rounded-xl p-4 ring-1 ring-inset ring-line">
+      <h3 className="mb-2 text-base font-semibold text-ink">Dietary counts · {main?.name ?? "main"} (yes)</h3>
+      {diets.size === 0 ? <p className="text-sm text-ink-muted">No confirmations yet.</p> :
+        <ul className="space-y-1 text-sm">{[...diets].sort((a, b) => b[1] - a[1]).map(([d, n]) => <li key={d} className="flex justify-between gap-3"><span className="capitalize text-sand-700">{d}</span><b className="tabular-nums text-ink">{n}</b></li>)}</ul>}
     </div>
   );
 }
@@ -107,18 +217,18 @@ function WishlistManager({ plan, commit, highlight }: SectionProps) {
   if (ext.type !== "birthday") return null;
   return (
     <div className="min-w-0">
-      <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-700"><Gift size={13} className="text-violet-600" /> Gift wishlist</div>
+      <SubHead icon={<Gift size={16} className="text-brand-700" />}>Gift wishlist</SubHead>
       {ext.wishlist.length === 0 ? <Empty>No wishes yet.</Empty> : (
-        <ul className="space-y-1.5">
+        <ul className="space-y-2">
           {ext.wishlist.map(w => (
-            <li key={w.id} className={`flex items-center gap-2 rounded-lg p-2 ring-1 ${w.claimedByGuestId ? "bg-emerald-50/50 ring-emerald-100" : w.priority === "high" ? "ring-amber-200" : "ring-slate-100"} ${hl(w.id)}`}>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-xs font-medium">{w.item}</div>
-                <div className="mt-0.5 flex gap-1"><Badge tone={priorityTone(w.priority)}>{w.priority}</Badge>{w.approxPaise !== undefined && <Badge>~{inr(w.approxPaise)}</Badge>}</div>
+            <li key={w.id} id={refAnchor(w.id)} className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl p-3 ring-1 ring-inset ${w.claimedByGuestId ? "bg-emerald-50/60 ring-emerald-200" : w.priority === "high" ? "ring-amber-300" : "ring-line"} ${hl(w.id)}`}>
+              <div className="min-w-0 flex-1 basis-40">
+                <p className="break-words text-base font-medium text-ink">{w.item}</p>
+                <div className="mt-1 flex flex-wrap gap-1.5"><Badge tone={priorityTone(w.priority)} className="capitalize">{w.priority}<span className="sr-only"> priority</span></Badge>{w.approxPaise !== undefined && <Badge><span className="tabular-nums">~{inr(w.approxPaise)}</span></Badge>}</div>
               </div>
               <select value={w.claimedByGuestId ?? ""} aria-label={`Who claimed ${w.item}`}
                 onChange={e => commit({ summary: `Wishlist ${w.item}`, commands: [{ op: "claim_wishlist_item", itemId: w.id, guestId: e.target.value || null }] })}
-                className={`min-h-7 max-w-36 rounded-md border px-1.5 py-1 text-[11px] ${w.claimedByGuestId ? "border-emerald-400 bg-emerald-50 text-emerald-900" : "border-slate-400 bg-white text-slate-700"}`}>
+                className={`${sel} max-w-44 ${w.claimedByGuestId ? "border-emerald-600 bg-emerald-50 text-emerald-900" : ""}`}>
                 <option value="">Unclaimed</option>
                 {plan.guests.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
               </select>
@@ -137,28 +247,25 @@ function ActivityRunSheet({ plan, highlight }: SectionProps) {
   if (ext.type !== "birthday") return null;
   return (
     <div className="min-w-0">
-      <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-700"><Timer size={13} className="text-sky-600" /> Party activity run-sheet</div>
+      <SubHead icon={<Timer size={16} className="text-peacock-700" />} right={<>Total run time <b className="text-ink">{ext.activities.reduce((x, a) => x + a.durationMin, 0)} min</b></>}>Party activity run-sheet</SubHead>
       {ext.activities.length === 0 ? <Empty>No activities yet.</Empty> : (
-        <div className="relative overflow-x-auto"><table className="w-full text-xs">
-          <thead><tr className="text-left text-[10px] uppercase tracking-wide text-slate-600"><th scope="col" className="py-1 font-medium">Activity</th><th scope="col" className="font-medium">Ages</th><th scope="col" className="font-medium">Mins</th><th scope="col" className="font-medium">Supplies</th></tr></thead>
-          <tbody className="divide-y divide-slate-100">
-            {ext.activities.map(a => (
-              <tr key={a.id} className={hl(a.id)}>
-                <td className="py-1.5 pr-2 font-medium">{a.name}</td>
-                <td className="tabular-nums text-slate-600">{a.ageRange ? `${a.ageRange[0]}–${a.ageRange[1]}` : "all"}</td>
-                <td className="tabular-nums text-slate-600">{a.durationMin}</td>
-                <td className="py-1"><div className="flex flex-wrap gap-1">{a.supplies.map(s => <Badge key={s}>{s}</Badge>)}</div></td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot><tr><td colSpan={4} className="pt-2 text-[11px] text-slate-600">Total run time <b className="tabular-nums">{ext.activities.reduce((x, a) => x + a.durationMin, 0)} min</b></td></tr></tfoot>
-        </table></div>
+        <ul className="divide-y divide-line-soft rounded-xl ring-1 ring-inset ring-line">
+          {ext.activities.map(a => (
+            <li key={a.id} id={refAnchor(a.id)} className={`px-3 py-2.5 ${hl(a.id)}`}>
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                <span className="text-base font-medium text-ink">{a.name}</span>
+                <span className="text-sm tabular-nums text-ink-muted">{a.durationMin} min · ages {a.ageRange ? `${a.ageRange[0]}–${a.ageRange[1]}` : "all"}</span>
+              </div>
+              {a.supplies.length > 0 && <div className="mt-1.5 flex flex-wrap gap-1.5"><span className="sr-only">Supplies:</span>{a.supplies.map(x => <Badge key={x}>{x}</Badge>)}</div>}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );
 }
 
-const TIER_TONE: Record<SponsorTier, Tone> = { title: "violet", gold: "amber", silver: "slate", in_kind: "sky" };
+const TIER_TONE: Record<SponsorTier, Tone> = { title: "secondary", gold: "gold", silver: "neutral", in_kind: "info" };
 
 /** Community: sponsors with tier, status, money received, AI pitch drafts and volunteer sign-ups. */
 function SponsorPipeline({ plan, commit, highlight, onAsk }: SectionProps) {
@@ -169,41 +276,42 @@ function SponsorPipeline({ plan, commit, highlight, onAsk }: SectionProps) {
   const received = ext.sponsors.reduce((a, s) => a + s.receivedPaise, 0);
   return (
     <div className="min-w-0">
-      <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-700"><Handshake size={13} className="text-violet-600" /> Sponsor pipeline
-        <span className="ml-auto font-normal tabular-nums text-slate-600">{inr(received)} received of {inr(pledged)} pledged</span></div>
-      <ul className="space-y-1.5">
+      <SubHead icon={<Handshake size={16} className="text-brand-700" />} right={<>{inr(received)} received of {inr(pledged)} pledged</>}>Sponsor pipeline</SubHead>
+      <ul className="space-y-2">
         {ext.sponsors.map(s => {
           const pct = s.pledgedPaise ? Math.min(100, (s.receivedPaise / s.pledgedPaise) * 100) : s.status === "paid" || s.status === "committed" ? 100 : 0;
           const prog = sponsorProgress(s);
           return (
-            <li key={s.id} className={`rounded-lg p-2 ring-1 ring-slate-100 ${hl(s.id)}`}>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-xs font-semibold">{s.name}</span>
+            <li key={s.id} id={refAnchor(s.id)} className={`rounded-xl p-3 ring-1 ring-inset ring-line ${hl(s.id)}`}>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-base font-semibold text-ink">{s.name}</span>
                 <Badge tone={TIER_TONE[s.tier]}>{labelOf(SPONSOR_TIER_OPTIONS, s.tier)}</Badge>
-                <select value={s.status} aria-label={`${s.name} status`}
-                  onChange={e => commit({ summary: `${s.name} → ${e.target.value}`, commands: [{ op: "update_sponsor", sponsorId: s.id, status: e.target.value as (typeof SPONSOR_STATUS_OPTIONS)[number]["value"] }] })}
-                  className="ml-auto min-h-7 rounded-md border border-slate-400 px-1 py-0.5 text-[11px]">
-                  {SPONSOR_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-                <button type="button" onClick={() => onAsk(`Draft a sponsor pitch email for ${s.name}`)} aria-haspopup="dialog"
-                  className="flex min-h-7 items-center gap-1 rounded-md bg-violet-700 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-violet-800"><Sparkles size={11} /> AI pitch<span className="sr-only"> for {s.name}</span></button>
+                <span className="ml-auto flex flex-wrap items-center gap-2">
+                  <select value={s.status} aria-label={`${s.name} status`}
+                    onChange={e => commit({ summary: `${s.name} → ${e.target.value}`, commands: [{ op: "update_sponsor", sponsorId: s.id, status: e.target.value as (typeof SPONSOR_STATUS_OPTIONS)[number]["value"] }] })}
+                    className={sel}>
+                    {SPONSOR_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                  <button type="button" onClick={() => onAsk(`Draft a sponsor pitch email for ${s.name}`)} aria-haspopup="dialog"
+                    className="flex min-h-9 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-semibold text-white hover:bg-primary-hover max-md:min-h-11 pointer-coarse:min-h-11"><Sparkles size={15} aria-hidden="true" /> AI pitch<span className="sr-only"> for {s.name}</span></button>
+                </span>
               </div>
-              <div className="mt-1.5 flex items-center gap-2">
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
                 {prog
                   ? <div role="progressbar" aria-label={prog.label} aria-valuemin={0} aria-valuemax={prog.valueMax} aria-valuenow={prog.valueNow} aria-valuetext={prog.valueText}
-                      className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100 ring-1 ring-inset ring-slate-300"><div className="h-full bg-emerald-600" style={{ width: `${pct}%` }} /></div>
-                  : <div aria-hidden="true" className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100 ring-1 ring-inset ring-slate-300"><div className="h-full bg-emerald-600" style={{ width: `${pct}%` }} /></div>}
-                <span className="text-[11px] tabular-nums text-slate-700">{inr(s.receivedPaise)} / {s.pledgedPaise ? inr(s.pledgedPaise) : "in-kind"}</span>
+                      className="h-2.5 min-w-24 flex-1 overflow-hidden rounded-full bg-sand-100 ring-1 ring-inset ring-sand-400"><div className="h-full bg-emerald-600" style={{ width: `${pct}%` }} /></div>
+                  : <div aria-hidden="true" className="h-2.5 min-w-24 flex-1 overflow-hidden rounded-full bg-sand-100 ring-1 ring-inset ring-sand-400"><div className="h-full bg-emerald-600" style={{ width: `${pct}%` }} /></div>}
+                <span className="text-sm tabular-nums text-sand-700">{inr(s.receivedPaise)} / {s.pledgedPaise ? inr(s.pledgedPaise) : "in-kind"}</span>
               </div>
-              {s.deliverables.length > 0 && <div className="mt-1 text-[10px] text-slate-600">{s.deliverables.join(" · ")}</div>}
+              {s.deliverables.length > 0 && <p className="mt-1.5 text-sm text-ink-muted">{s.deliverables.join(" · ")}</p>}
             </li>
           );
         })}
       </ul>
       {ext.volunteerSignups.length > 0 && (
-        <div className="mt-2 rounded-lg bg-emerald-50/60 p-2 text-[11px] text-emerald-900 ring-1 ring-emerald-100">
+        <p className="mt-3 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-900 ring-1 ring-inset ring-emerald-200">
           <b>Volunteer sign-ups:</b> {ext.volunteerSignups.map(v => `${v.name}${v.shift ? ` (${v.shift})` : ""}`).join(", ")}
-        </div>
+        </p>
       )}
     </div>
   );
@@ -216,25 +324,26 @@ function PermitTracker({ plan, today, commit, highlight }: SectionProps) {
   if (ext.type !== "community") return null;
   return (
     <div className="min-w-0">
-      <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-700"><ShieldCheck size={13} className="text-sky-600" /> Municipal permits
-        <span className="ml-auto flex flex-wrap items-center gap-2 font-normal text-slate-600"><Users size={12} />{ext.volunteers} volunteers · <Megaphone size={12} />{ext.expectedFootfall.toLocaleString("en-IN")} footfall</span></div>
-      <ul className="space-y-1.5">
+      <SubHead icon={<ShieldCheck size={16} className="text-peacock-700" />}
+        right={<span className="flex flex-wrap items-center gap-x-2"><span className="flex items-center gap-1"><Users size={14} aria-hidden="true" />{ext.volunteers} volunteers</span><span className="flex items-center gap-1"><Megaphone size={14} aria-hidden="true" />{ext.expectedFootfall.toLocaleString("en-IN")} footfall</span></span>}>Municipal permits</SubHead>
+      <ul className="space-y-2">
         {ext.permits.map(p => {
           const d = p.applyBy ? daysBetween(today, p.applyBy) : null;
           const risk = p.status !== "approved" && d !== null && d <= 14;
+          const late = d !== null && d < 0 && p.status === "not_started";
           return (
-            <li key={p.id} className={`flex flex-wrap items-center gap-2 rounded-lg p-2 ring-1 ${p.status === "approved" ? "ring-emerald-100" : risk ? "ring-amber-200" : "ring-slate-100"} ${hl(p.id)}`}>
-              <Building2 size={14} className="text-slate-500" />
-              <div className="min-w-0 flex-1">
-                <div className="text-xs font-medium">{p.authority} · {p.kind}</div>
-                <div className="text-[10px] text-slate-600 tabular-nums">
-                  {p.applyBy ? <>apply by {p.applyBy} <span className={d !== null && d < 0 && p.status === "not_started" ? "font-semibold text-rose-700" : risk ? "font-semibold text-amber-800" : ""}>({relDays(today, p.applyBy)})</span></> : "no deadline"}
+            <li key={p.id} id={refAnchor(p.id)} className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl p-3 ring-1 ring-inset ${p.status === "approved" ? "ring-emerald-300" : late ? "ring-red-300" : risk ? "ring-amber-300" : "ring-line"} ${hl(p.id)}`}>
+              <Building2 size={18} aria-hidden="true" className="shrink-0 text-sand-600" />
+              <div className="min-w-0 flex-1 basis-44">
+                <p className="break-words text-base font-medium text-ink">{p.authority} · {p.kind}</p>
+                <p className="text-sm tabular-nums text-ink-muted">
+                  {p.applyBy ? <>apply by {longDate(p.applyBy)} <span className={late ? "font-semibold text-red-700" : risk ? "font-semibold text-amber-800" : ""}>({relDays(today, p.applyBy)}{late ? ", late" : risk ? ", soon" : ""})</span></> : "no deadline"}
                   {p.feePaise > 0 && <> · fee {inr(p.feePaise)}</>}{p.referenceNo && <> · ref <b>{p.referenceNo}</b></>}
-                </div>
+                </p>
               </div>
               <select value={p.status} aria-label={`${p.authority} status`}
                 onChange={e => commit({ summary: `${p.authority} ${p.kind} → ${e.target.value}`, commands: [{ op: "set_permit_status", permitId: p.id, status: e.target.value as (typeof PERMIT_STATUS_OPTIONS)[number]["value"] }] })}
-                className={`min-h-7 rounded-md border px-1 py-0.5 text-[11px] ${p.status === "approved" ? "border-emerald-400 bg-emerald-50 text-emerald-900" : "border-slate-400"}`}>
+                className={`${sel} ${p.status === "approved" ? "border-emerald-600 bg-emerald-50 text-emerald-900" : ""}`}>
                 {PERMIT_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </li>
@@ -257,27 +366,29 @@ const SECTIONS: Record<OrganizerSectionId, ComponentType<SectionProps>> = {
 };
 
 const ICONS: Record<EventTemplate["layout"]["icon"], ReactNode> = {
-  heart: <Heart size={16} className="text-rose-500" />,
-  cake: <Cake size={16} className="text-violet-600" />,
-  megaphone: <Megaphone size={16} className="text-sky-600" />,
+  heart: <Heart size={18} className="text-maroon-700" />,
+  cake: <Cake size={18} className="text-brand-700" />,
+  megaphone: <Megaphone size={18} className="text-peacock-700" />,
 };
 const ARRANGEMENT: Record<EventTemplate["layout"]["arrangement"], string> = {
-  "main-aside": "grid gap-4 xl:grid-cols-[1fr_16rem]",
-  "two-up": "grid gap-4 xl:grid-cols-2",
+  // Container queries: the card arranges by its own width (the /event page is full width, a phone is not).
+  "main-aside": "grid gap-5 @3xl:grid-cols-[1fr_16rem] @6xl:grid-cols-[1fr_20rem]",
+  "two-up": "grid gap-5 @3xl:grid-cols-2",
 };
 
 export default function ArchetypeCard({ template, ...props }: Props) {
   const { layout } = template;
   const ext = props.plan.event.ext;
   return (
-    <Card title={formatTokens(layout.heading, templateTokens(props.plan))} icon={ICONS[layout.icon]} right={<Badge tone="indigo">event.ext · {ext.type}</Badge>}>
-      <div className={ARRANGEMENT[layout.arrangement]}>
+    <Card id="event" title={formatTokens(layout.heading, templateTokens(props.plan))} icon={ICONS[layout.icon]} right={<Badge tone="secondary">event.ext · {ext.type}</Badge>}
+      subtitle="The parts of the plan specific to this kind of event.">
+      <div className="@container"><div className={ARRANGEMENT[layout.arrangement]}>
         {layout.columns.map((col, i) => (
-          <div key={i} className="min-w-0 space-y-3">
+          <div key={i} className="min-w-0 space-y-4">
             {col.map(id => { const Section = SECTIONS[id]; return <Section key={id} {...props} />; })}
           </div>
         ))}
-      </div>
+      </div></div>
     </Card>
   );
 }

@@ -21,6 +21,13 @@ export const ScannedQuote = z.object({
   summary: z.string().default(""),
   /** Fields the reader flagged as unclear; shown to the organizer before approval. */
   uncertain: z.array(z.string()).optional(),
+  // v6: structured comparison fields (filled when the document states them).
+  basis: z.enum(["flat", "per_guest", "per_hour"]).optional(),
+  inclusions: z.array(z.string()).default([]),
+  exclusions: z.array(z.string()).default([]),
+  extraCharges: z.array(z.object({ label: z.string().min(1), amountPaise: z.number().int().nonnegative().nullable() })).default([]),
+  guestsCovered: z.number().int().positive().optional(),
+  openQuestions: z.array(z.string()).default([]),
 });
 export type ScannedQuote = z.infer<typeof ScannedQuote>;
 
@@ -38,6 +45,12 @@ export const VisionExtraction = z.object({
   redFlags: z.array(z.string()).describe("Risky clauses, each one short line starting with ⚠️"),
   summary: z.string().describe("One sentence"),
   uncertain: z.array(z.string()).optional().describe("Names of fields you could not read clearly or had to interpret (e.g. 'category', 'depositRupees'). Never guess a missing amount: omit it and list it here."),
+  basis: z.enum(["flat", "per_guest", "per_hour"]).optional().describe("How the price is quoted: flat package, per plate/guest, or per hour"),
+  inclusions: z.array(z.string()).optional().describe("What the quote says is included, short items as printed"),
+  exclusions: z.array(z.string()).optional().describe("What it says is NOT included"),
+  extraCharges: z.array(z.object({ label: z.string(), amountRupees: z.number().optional() })).optional().describe("Extra charges named (overtime, generator, travel), with the printed amount in whole rupees if any"),
+  guestsCovered: z.number().int().optional().describe("Number of guests/plates the price covers, only if printed"),
+  openQuestions: z.array(z.string()).optional().describe("What is unclear and should be asked before booking (e.g. 'Is GST included?')"),
 });
 export type VisionExtraction = z.infer<typeof VisionExtraction>;
 
@@ -78,12 +91,18 @@ export function visionToScanned(v: VisionExtraction, today: string): ScannedQuot
   const dueAt = v.dueAt && realDate(v.dueAt) ? v.dueAt : v.depositDueInDays !== undefined ? addDays(today, v.depositDueInDays) : undefined;
   const uncertain = (v.uncertain ?? []).map(x => String(x).slice(0, 40)).slice(0, 10);
   const notes = (v.notes ?? "").slice(0, 1000);
+  const short = (xs: string[] | undefined, n = 20) => (xs ?? []).map(x => String(x).trim().slice(0, 160)).filter(Boolean).slice(0, n);
+  const extraCharges = (v.extraCharges ?? []).slice(0, 12).filter(x => String(x.label ?? "").trim())
+    .map(x => ({ label: String(x.label).trim().slice(0, 120), amountPaise: x.amountRupees === undefined || x.amountRupees === null ? null : rupeesToPaise(x.amountRupees, "extraCharges.amountRupees") }));
+  const guestsCovered = Number.isInteger(v.guestsCovered) && v.guestsCovered! > 0 && v.guestsCovered! <= 100_000 ? v.guestsCovered : undefined;
   return ScannedQuote.parse({
     vendorName, category: v.category, itemLabel, quotedPaise,
     depositRequiredPaise, dueAt, subEvent: v.subEvent || undefined,
     notes: uncertain.length ? `${notes}${notes ? " " : ""}[Unclear on the document: ${uncertain.join(", ")}]` : notes,
     redFlags: v.redFlags.map(r => r.slice(0, 200)).slice(0, 12), summary: v.summary.slice(0, 300),
     ...(uncertain.length ? { uncertain } : {}),
+    ...(v.basis ? { basis: v.basis } : {}), inclusions: short(v.inclusions), exclusions: short(v.exclusions), extraCharges,
+    ...(guestsCovered ? { guestsCovered } : {}), openQuestions: short(v.openQuestions, 10).map(x => x.slice(0, 200)),
   });
 }
 
@@ -170,10 +189,18 @@ export function parseQuoteText(text: string, today: string): ScannedQuote {
   const minGuarantee = field("Minimum guarantee");
   if (minGuarantee) redFlags.push(`⚠️ Minimum guarantee: ${minGuarantee}`);
   const ev = field("Event");
+  // v6: the structured comparison fields, when the document states them.
+  const listOf = (label: string) => (field(label) ?? "").split(/[;,]\s*/).map(x => x.trim().replace(/\.$/, "")).filter(Boolean);
+  const guests = (field("Guests") ?? item).match(/(\d{2,6})\s*(?:guests|plates|pax|people)/i)?.[1];
+  const basis = /per\s+(plate|guest|head|pax)/i.test(totalLine + " " + (field("Rate") ?? "")) ? "per_guest" as const : /per\s+hour|\/hr/i.test(totalLine) ? "per_hour" as const : "flat" as const;
+  const extraCharges = terms.split(/(?<=\.)\s+/).map(t => t.replace(/\.$/, "").trim()).filter(t => /extra|overtime|additional|actuals|fee/i.test(t))
+    .map(t => { const m = t.match(/₹\s?[\d,]+(?:\.\d+)?/); return { label: t.slice(0, 120), amountPaise: m ? money(m[0]) : null }; });
+  const openQuestions = [...(/(?:incl\w*|excl\w*|plus|\+)\s*(?:of\s+)?gst|gst\s*(?:incl|excl|extra|@|\d)|taxes/i.test(text) ? [] : ["Is GST included?"]), ...(guests ? [] : ["How many guests does the price cover?"])];
   return ScannedQuote.parse({
     vendorName, category, itemLabel: item, quotedPaise, depositRequiredPaise, dueAt,
     subEvent: ev ? ev.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") : undefined,
-    notes: terms, redFlags,
+    notes: terms, redFlags, basis, inclusions: listOf("Includes"), exclusions: [...listOf("Excludes"), ...listOf("Not included")], extraCharges,
+    ...(guests ? { guestsCovered: Number(guests) } : {}), openQuestions,
     summary: `${vendorName} quotes ${rupees(quotedPaise)} for ${item}${depositRequiredPaise ? `, ${rupees(depositRequiredPaise)} upfront` : ""}.`,
   });
 }
@@ -207,6 +234,8 @@ export function scanToActions(q: ScannedQuote, plan: AgentState, today: string, 
       ...(q.depositRequiredPaise !== undefined ? { depositRequiredPaise: q.depositRequiredPaise } : {}),
       ...(q.dueAt ? { dueAt: q.dueAt } : {}), receivedOn: today, ...(subEvent ? { subEvent } : {}),
       notes: q.notes, redFlags: q.redFlags,
+      ...(q.basis ? { basis: q.basis } : {}), inclusions: q.inclusions, exclusions: q.exclusions, extraCharges: q.extraCharges,
+      ...(q.guestsCovered ? { guestsCovered: q.guestsCovered } : {}), openQuestions: q.openQuestions,
     }],
   };
   const out = executeAgentTool("apply_plan_changes", batch, plan, today, role);

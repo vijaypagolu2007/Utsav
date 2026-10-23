@@ -1,9 +1,11 @@
 // Gemini function calling (@google/genai). The JSON Schema comes straight from the Zod source of truth.
 import { z } from "zod";
-import { Batch, applyBatch, derive, SetRsvp, SetGuestDiet, ClaimWishlistItem, CommunitySignup } from "./commands";
+import { AgentBatch, applyBatch, derive, SetRsvp, SetGuestDiet, ClaimWishlistItem, CommunitySignup } from "./commands";
 import { InitializeEventPlan } from "./blueprint";
-import { DraftOutboundMessage, summarizeForGuest, summarizePlan } from "./agent";
+import { DraftOutboundMessage, RevisePlan, SuggestVendorQuestions, summarizeForGuest, summarizePlan } from "./agent";
+import { prioritiesDigest } from "./priorities";
 import { computePlanInsights, insightsDigest, todayIST } from "./insights";
+import { ideaContext, SuggestIdeas } from "./ideas";
 import type { AgentState } from "./schema";
 
 /**
@@ -42,7 +44,7 @@ export const functionDeclarations = [
       "Use weekday names as given; never compute dates yourself. Amounts are in paise (₹1 = 100). " +
       "The app dry-runs the batch: small changes auto-apply, money ≥ ₹25,000 / date moves / payments wait for the user's approval. " +
       "On failure you get {reason, failedCommandIndex, diagnostics, counterOffer}; use them to explain and propose the counter-offer.",
-    parametersJsonSchema: toSchema(Batch),
+    parametersJsonSchema: toSchema(AgentBatch),
   },
   {
     name: "get_plan_snapshot",
@@ -54,9 +56,12 @@ export const functionDeclarations = [
     description:
       "Create a brand-new event plan from a one-line brief (cold start). Give budget lines as relative weightBps, NOT amounts: " +
       "the tool allocates totalBudgetRupees across them with largest-remainder rounding so it sums exactly. Give sub-event days as dayOffset from startDate, " +
-      "permit deadlines as applyByOffsetDays, and task deadlines as dueOffsetDays; the tool computes every date. Fill ext for the event type: " +
-      "wedding → partners, traditions (sub-events Haldi, Mehendi, Sangeet, Muhurtham as main, Reception as post); " +
-      "birthday → honoree, turningAge, theme, wishlist, activities; community → sponsors, permits, volunteers.",
+      "permit deadlines as applyByOffsetDays, and task deadlines as dueOffsetDays; the tool computes every date. Fill ext for the event type " +
+      "(wedding → partners, traditions; birthday → honoree, turningAge, theme, wishlist, activities; community → sponsors, permits, volunteers). " +
+      "Choose sub-events that fit the tradition, city, age and venue the user gave; never a fixed list. For example: Haldi, Mehendi, Sangeet, " +
+      "Muhurtham and Reception suit a Hindu or Telugu wedding; a Nikah and Walima, a church ceremony and reception, an Anand Karaj, or a registration " +
+      "and dinner suit others. A child's party at home needs no venue, bar, cabs or adult wishlist items. A Ganesh pandal runs sthapana, daily aarti and " +
+      "visarjan days; Navratri runs nightly garba. If the user's setup lists budget categories, use only those.",
     parametersJsonSchema: toSchema(InitializeEventPlan),
   },
   {
@@ -68,6 +73,31 @@ export const functionDeclarations = [
     name: "draft_outbound_message",
     description: "Draft a WhatsApp or email to a vendor, sponsor or guests (negotiation, sponsor pitch, RSVP reminder). Shown as an editable card; the user sends it. Never claim it was sent.",
     parametersJsonSchema: toSchema(DraftOutboundMessage),
+  },
+  {
+    name: "suggest_ideas",
+    description:
+      "Suggest 4–8 personalised idea cards (theme, decor, menu, activity, return_gift, invite_text, music, photo) for this event. " +
+      "Use the IDEA CONTEXT: tradition, city and region, age, guest count, diets and the organiser's note. Give realistic Indian costs for the WHOLE event " +
+      "in whole rupees (estLowRupees, estHighRupees); the app converts and checks them against what is left in each category, so stay within it where you can. " +
+      "Cards are saved to the user's Ideas page; they never change the budget until the user adopts one.",
+    parametersJsonSchema: toSchema(SuggestIdeas),
+  },
+  {
+    name: "revise_plan",
+    description:
+      "Revise the plan instead of restarting it when the budget, dates or guest count change (e.g. 'our budget dropped by ₹50,000 and the event is 2 weeks earlier'). " +
+      "Pass the change exactly as the user said it (rupees and weeks/days); the tool computes the new total and dates, moves every sub-event and task, " +
+      "and fixes any overrun by the organiser's priorities (cut-first, then flexible, never must-protect). It also fixes an existing overrun when called with no changes. " +
+      "It returns ONE approval card plus `explain` lines: use them to explain the trade-offs in plain words.",
+    parametersJsonSchema: toSchema(RevisePlan),
+  },
+  {
+    name: "suggest_vendor_questions",
+    description:
+      "Questions the organiser should ask one kind of vendor before booking (what's included, guests covered, extra charges, timings, cancellation, what still needs clarifying). " +
+      "Use the vendor-checklist slot key from the live state. Never state or guess prices or availability.",
+    parametersJsonSchema: toSchema(SuggestVendorQuestions),
   },
 ] as const;
 
@@ -85,13 +115,23 @@ Rules:
 6. Changes that spend money or contact vendors: propose them and wait for a yes. Outbound messages are drafts via draft_outbound_message only.
 7. To start a new event ("plan a…", "switch to a…"), call initialize_event_plan with weights and offsets, never amounts or computed dates.
 8. Never do budget math or date arithmetic in your reply; quote numbers from tool results or the live state below.
-9. Keep replies to 1–3 short sentences. Use ₹ with Indian grouping (₹1,50,000).
+9. For changes and facts, keep replies to 1–3 short sentences. For ideas and advice ("give me sangeet ideas", "how do I keep costs down?"), call suggest_ideas when cards help and you may answer in up to 6 short lines or a short list. Use ₹ with Indian grouping (₹1,50,000).
+10. Budget lines can be added (add_budget_item) or removed (remove_budget_item); the total, guest count, city and dates change with set_event_basics; "rebalance to my total" is rebalance_budget with the headroom from the live state; an idea joins the plan with adopt_idea. All of these are shown to the user for approval.
+11. PRIORITIES decide trade-offs. When money is short (over budget, "budget dropped", "too pricey"), never cut every category evenly: call revise_plan (it cuts cut-first categories, then flexible ones, and never must-protect ones), then explain each trade-off in plain words, e.g. "Decor −₹60,000 to keep Catering intact". When the budget, dates or guest count change, REVISE with revise_plan; never start a new plan.
+12. Amounts from blueprints, ideas and envelopes are ESTIMATES; only a vendor's quote is QUOTED and only signed money is COMMITTED. Say which one a figure is. Never claim a vendor is available or that a price is confirmed.
+13. Vendors: add_vendor, set_vendor_stage, remove_vendor and set_vendor_need manage the checklist; suggest_vendor_questions gives questions to ask. Tasks can wait for other tasks (set_task_dependency); venue booking usually comes first.
 
 LIVE STATE (ids and slugs are exact):
 ${summarizePlan(st, today)}
 
+PRIORITIES: ${prioritiesDigest(st)}
+
 RED FLAGS (deterministic):
 ${insightsDigest(computePlanInsights(st, today))}
+
+IDEA CONTEXT:
+${ideaContext(st)}
+IDEAS ON THE BOARD (id status title): ${st.ideas.filter(i => i.status !== "dismissed").slice(0, 30).map(i => `${i.id} ${i.status} ${i.title}`).join(" | ") || "(none)"}
 `.trim();
 
 /** Server-side tool executor. Persist state (Firestore or Supabase) only when ok is true. */

@@ -14,6 +14,10 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // The event-type card (RSVPs, diets, wishlist, sponsors, permits) lives on /event; /guests is a friendly alias.
+  async redirects() {
+    return [{ source: "/guests", destination: "/event", permanent: false }];
+  },
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },

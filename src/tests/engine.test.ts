@@ -17,7 +17,7 @@ import { budgetLedgerCsv, budgetToCsv, runSheetHtml } from "../export";
 import { parseStore, serializeStore, freshHistory, defaultStore } from "../persistence";
 import { runOfflineGuestAgent } from "../offline";
 import { executeAgentTool } from "../agent";
-import { matchBudgetItem } from "../commands";
+import { matchBudgetItem, DIRECT_EDIT_OPS, GUEST_ALLOWED_OPS, MAX_DIRECT_AMOUNT_PAISE, RENAMEABLE } from "../commands";
 
 const TODAY = "2026-10-20";
 const sum = (m: Map<string, number>) => [...m.values()].reduce((a, b) => a + b, 0);
@@ -338,7 +338,7 @@ describe("offline demo brain (flagship chips)", () => {
 
 test("Gemini declarations are generated from Zod and Gemini-safe", () => {
   const names = functionDeclarations.map(f => f.name);
-  assert.deepEqual(names, ["apply_plan_changes", "get_plan_snapshot", "initialize_event_plan", "get_plan_insights", "draft_outbound_message"]);
+  assert.deepEqual(names, ["apply_plan_changes", "get_plan_snapshot", "initialize_event_plan", "get_plan_insights", "draft_outbound_message", "suggest_ideas", "revise_plan", "suggest_vendor_questions"]);
   const json = JSON.stringify(functionDeclarations);
   assert.ok(!json.includes('"$schema"'));
   assert.ok(!json.includes('"oneOf"'));
@@ -651,5 +651,133 @@ describe("Gemini latency settings", () => {
     assert.equal(isThinkingConfigRejected(new Error('{"error":{"code":400,"message":"Thinking level is not supported for this model."}}')), true);
     assert.equal(isThinkingConfigRejected(new Error('{"error":{"code":400,"message":"Invalid argument"}}')), false);
     assert.equal(isThinkingConfigRejected(new Error('{"error":{"code":503,"message":"thinking too hard"}}')), false);
+  });
+});
+
+// ---------- direct edits (inline editing in the organizer UI) ----------
+describe("direct-edit ops: renames and planned amounts", () => {
+  const ui = { source: "ui" } as const;
+  const run = (commands: unknown[], opts: Parameters<typeof applyBatch>[2] = ui, st = royalWedding) => applyBatch(st, { summary: "edit", commands }, opts);
+  const DIRECT = [
+    { op: "rename_event", title: "Arjun weds Meera" },
+    { op: "set_partner_names", partners: ["Arjun", "Meera R."] },
+    { op: "rename_entity", kind: "budget_item", id: "b1", name: "Haldi flowers" },
+    { op: "set_planned_amount", budgetItemId: "b1", plannedPaise: 9_000_000, expectedPaise: 8_000_000 },
+  ];
+
+  test("each rename lands on exactly one field and leaves ids, slugs and money alone", () => {
+    const cases: [unknown, (s: AgentState) => unknown, unknown][] = [
+      [{ op: "rename_event", title: "  Arjun weds Meera  " }, s => s.event.title, "Arjun weds Meera"],
+      [{ op: "set_partner_names", partners: ["Arjun", "Meera R."] }, s => s.event.ext.type === "wedding" && s.event.ext.partners, ["Arjun", "Meera R."]],
+      [{ op: "rename_entity", kind: "budget_item", id: "b1", name: "Haldi flowers" }, s => s.budgetItems.find(b => b.id === "b1")!.label, "Haldi flowers"],
+      [{ op: "rename_entity", kind: "task", id: royalWedding.tasks[0]!.id, name: "Book the priest" }, s => s.tasks[0]!.title, "Book the priest"],
+      [{ op: "rename_entity", kind: "sub_event", id: "s1", name: "Pasupu" }, s => [s.subEvents[0]!.name, s.subEvents[0]!.slug], ["Pasupu", "haldi"]],
+      [{ op: "rename_entity", kind: "guest", id: "g1", name: "Lakshmi Rao" }, s => s.guests.find(g => g.id === "g1")!.name, "Lakshmi Rao"],
+      [{ op: "rename_entity", kind: "household", id: "h3", name: "Sharma-Verma family" }, s => s.households.find(h => h.id === "h3")!.label, "Sharma-Verma family"],
+      [{ op: "rename_entity", kind: "vendor", id: "v5", name: "DJ Nikhil & Co" }, s => s.vendors.find(v => v.id === "v5")!.name, "DJ Nikhil & Co"],
+    ];
+    for (const [cmd, read, want] of cases) {
+      const r = run([cmd]);
+      assert.ok(r.ok, JSON.stringify(cmd) + (r.ok ? "" : r.reason));
+      assert.deepEqual(read(r.state), want);
+      assert.equal(plannedTotal(r.state), plannedTotal(royalWedding));
+      assert.equal(r.state.subEvents.map(s => s.slug).join(), royalWedding.subEvents.map(s => s.slug).join());
+    }
+    // A renamed sub-event is still found by its slug (judge prompts, links and RSVP keys keep working).
+    const renamed = run([{ op: "rename_entity", kind: "sub_event", id: "s1", name: "Pasupu" }]);
+    assert.ok(renamed.ok);
+    assert.ok(applyBatch(renamed.state, { summary: "x", commands: [{ op: "move_sub_event", subEvent: "haldi", to: { weekday: "friday" } }] }).ok);
+  });
+
+  test("names are validated by Zod: trimmed, non-empty, at most 120 characters", () => {
+    for (const name of ["", "   ", "x".repeat(121)]) {
+      const r = run([{ op: "rename_entity", kind: "task", id: royalWedding.tasks[0]!.id, name }]);
+      assert.equal(r.ok, false, JSON.stringify(name));
+    }
+    assert.ok(run([{ op: "rename_entity", kind: "task", id: royalWedding.tasks[0]!.id, name: "x".repeat(120) }]).ok);
+    assert.equal(run([{ op: "rename_entity", kind: "plan", id: "b1", name: "x" }]).ok, false);
+    assert.equal(run([{ op: "rename_entity", kind: "guest", id: "nope", name: "x" }]).ok, false);
+    assert.equal(run([{ op: "set_partner_names", partners: ["Asha", "Ravi"] }], ui, arcadeBirthday).ok, false); // not a wedding
+  });
+
+  test("renames that would make lookups ambiguous are refused", () => {
+    const dupSub = run([{ op: "rename_entity", kind: "sub_event", id: "s1", name: "sangeet" }]);
+    assert.ok(!dupSub.ok && /already called "Sangeet"/.test(dupSub.reason));
+    const dupVendor = run([{ op: "rename_entity", kind: "vendor", id: "v5", name: "n convention" }]);
+    assert.ok(!dupVendor.ok && /already called "N Convention"/.test(dupVendor.reason));
+    assert.ok(run([{ op: "rename_entity", kind: "sub_event", id: "s1", name: "HALDI" }]).ok); // its own name in another case is fine
+  });
+
+  test("planned amount: integer paise, non-negative, capped at ₹100 crore, never below committed, locks block cuts only", () => {
+    const set = (id: string, plannedPaise: unknown, expectedPaise: unknown) => run([{ op: "set_planned_amount", budgetItemId: id, plannedPaise, expectedPaise }]);
+    const up = set("b1", 9_000_000, 8_000_000);
+    assert.ok(up.ok);
+    assert.equal(up.state.budgetItems.find(b => b.id === "b1")!.plannedPaise, 9_000_000);
+    assert.equal(plannedTotal(up.state) - plannedTotal(royalWedding), 1_000_000);
+    assert.deepEqual(up.log, ["Haldi marigold decor: planned ₹80,000 → ₹90,000"]);
+    for (const bad of [-1, 1.5, "100", MAX_DIRECT_AMOUNT_PAISE + 1, Number.NaN]) assert.equal(set("b1", bad, 8_000_000).ok, false, String(bad));
+    assert.ok(set("b12", MAX_DIRECT_AMOUNT_PAISE, 4_000_000).ok); // the cap itself is allowed (and flags over-budget in the log)
+    const belowCommitted = set("b1", 2_000_000, 8_000_000);
+    assert.ok(!belowCommitted.ok && /below the ₹30,000 already committed/.test(belowCommitted.reason));
+    assert.ok(set("b1", 3_000_000, 8_000_000).ok); // exactly committed is fine
+    const lockedCut = set("b5", 11_000_000, 12_000_000);
+    assert.ok(!lockedCut.ok && /locked/.test(lockedCut.reason));
+    assert.ok(set("b5", 13_000_000, 12_000_000).ok); // a top-up on a locked line still lands, as with adjust_budget
+    const stale = set("b1", 9_000_000, 7_000_000);
+    assert.ok(!stale.ok && /changed while you were editing: it is now ₹80,000/.test(stale.reason));
+    assert.equal(set("nope", 1, 1).ok, false);
+    assert.ok(set("b1", 8_000_000, 8_000_000).ok); // unchanged is a no-op, not an error
+  });
+
+  test("organizer-only: the guest role is refused every direct edit (the allowlist doesn't grow)", () => {
+    for (const c of DIRECT) {
+      assert.ok(!GUEST_ALLOWED_OPS.has(c.op as never), c.op);
+      for (const opts of [{ role: "guest" as const }, { role: "guest" as const, source: "ui" as const }]) {
+        const r = run([{ op: "set_rsvp", guestId: "g13", subEvent: "sangeet", answer: "yes" }, c], opts);
+        assert.equal(r.ok, false, c.op);
+        if (!r.ok) { assert.equal(r.failedCommandIndex, 1); assert.match(r.reason, /Guest Concierge Mode is read-only/); }
+      }
+    }
+    assert.deepEqual([...GUEST_ALLOWED_OPS].sort(), ["claim_wishlist_item", "community_signup", "set_guest_diet", "set_rsvp"]);
+  });
+
+  test("never from the AI: refused without source 'ui', absent from the Gemini declaration and the agent executor", () => {
+    for (const c of DIRECT) {
+      const r = run([c], {});
+      assert.ok(!r.ok && /direct edit: only the organiser's own controls/.test(r.reason), c.op);
+      assert.equal(run([c], { role: "organizer", source: "agent" }).ok, false);
+      assert.ok(run([c]).ok, c.op);
+      const viaTool = executeAgentTool("apply_plan_changes", { summary: "x", commands: [c] }, royalWedding, TODAY, "organizer");
+      assert.equal(viaTool.response.ok, false, c.op);
+      assert.equal(viaTool.working, royalWedding);
+    }
+    const declared = JSON.stringify(functionDeclarations.find(f => f.name === "apply_plan_changes")!.parametersJsonSchema);
+    for (const op of DIRECT_EDIT_OPS) assert.ok(!declared.includes(op), op);
+    assert.ok(declared.includes("adjust_budget") && declared.includes("set_sub_event_visibility"));
+  });
+
+  test("trust tiers: renames are Tier 0; a planned amount follows the ₹25,000 adjust_budget rule", () => {
+    const tier = (c: unknown) => batchTier(Batch.parse({ summary: "x", commands: [c] }).commands);
+    assert.equal(tier({ op: "rename_event", title: "x" }), 0);
+    assert.equal(tier({ op: "set_partner_names", partners: ["a", "b"] }), 0);
+    for (const kind of RENAMEABLE) assert.equal(tier({ op: "rename_entity", kind, id: "x", name: "y" }), 0, kind);
+    assert.equal(tier({ op: "set_planned_amount", budgetItemId: "b1", plannedPaise: 8_000_000 + 2_499_999, expectedPaise: 8_000_000 }), 0);
+    assert.equal(tier({ op: "set_planned_amount", budgetItemId: "b1", plannedPaise: 8_000_000 + 2_500_000, expectedPaise: 8_000_000 }), 1);
+    assert.equal(tier({ op: "set_planned_amount", budgetItemId: "b1", plannedPaise: 5_500_000, expectedPaise: 8_000_000 }), 1);
+    assert.equal(tier({ op: "adjust_budget", category: "decor", deltaPaise: -2_500_000 }), 1); // unchanged
+  });
+
+  test("existing ops behave exactly as before when the source is 'ui'", () => {
+    const b = { summary: "Cut ₹20k from decor and move the Haldi to Friday", commands: [
+      { op: "adjust_budget", category: "decor", deltaPaise: -2_000_000 }, { op: "move_sub_event", subEvent: "haldi", to: { weekday: "friday" } }] };
+    assert.deepEqual(applyBatch(royalWedding, b, ui), applyBatch(royalWedding, b));
+    const over = { summary: "x", commands: [{ op: "adjust_budget", category: "decor", deltaPaise: -15_000_000 }] };
+    assert.deepEqual(applyBatch(royalWedding, over, ui), applyBatch(royalWedding, over));
+  });
+
+  test("a direct edit is pure: the input plan is never mutated", () => {
+    const before = JSON.stringify(royalWedding);
+    for (const c of DIRECT) run([c]);
+    assert.equal(JSON.stringify(royalWedding), before);
   });
 });

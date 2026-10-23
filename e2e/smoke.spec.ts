@@ -1,16 +1,24 @@
 import { expect, test, type Page } from "@playwright/test";
+import { skipWelcome, openPageNav } from "./helpers";
 
 // Every test starts from a clean browser profile (fresh localStorage), so state never leaks between tests.
 const pageErrors: string[] = [];
 test.beforeEach(async ({ page }) => {
   pageErrors.length = 0;
   page.on("pageerror", e => pageErrors.push(e.message));
+  await skipWelcome(page);
   await page.goto("/");
   await expect(page.getByText("Utsav Co-Pilot")).toBeVisible();
 });
 test.afterEach(() => { expect(pageErrors, "uncaught client-side exceptions").toEqual([]); });
 
 const rupees = (s: string) => Number(s.replace(/[^\d]/g, ""));
+// The organizer dashboard is split into pages (/, /budget, /tasks, /schedule, /event). Go to the page that holds a
+// control before touching it: a client-side click on the page navigation, so the plan state carries over.
+async function openPage(page: Page, name: "Overview" | "Budget" | "Tasks" | "Schedule" | "Event") {
+  await openPageNav(page, name);
+}
+
 const kpi = (page: Page, name: string) => page.getByTestId(`kpi-${name}`).locator("dd").first();
 // The Co-Pilot lives in a modal drawer that is closed by default.
 async function openCopilot(page: Page) {
@@ -67,18 +75,36 @@ test("quote scanner sample opens as a Tier-1 card with red flags", async ({ page
   await expect(card.getByRole("button", { name: "Approve & Update Budget" })).toBeVisible();
 });
 
+// Export CSV and Print Run-Sheet live in the header's "More" menu (APG menu button), so they are menu items.
+async function openMore(page: Page) {
+  await page.getByRole("button", { name: "More", exact: true }).click();
+  await expect(page.getByRole("menu")).toBeVisible();
+}
+
 test("exports: CSV downloads, run sheet opens", async ({ page, context }) => {
-  const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: /Export CSV/ }).click()]);
+  await openMore(page);
+  const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("menuitem", { name: /Export CSV/ }).click()]);
   expect(download.suggestedFilename()).toMatch(/budget-ledger\.csv$/);
-  const [sheet] = await Promise.all([context.waitForEvent("page"), page.getByRole("button", { name: /Print Run-Sheet/ }).click()]);
+  await openMore(page);
+  const [sheet] = await Promise.all([context.waitForEvent("page"), page.getByRole("menuitem", { name: /Print Run-Sheet/ }).click()]);
   await expect(sheet.locator("body")).toContainText(/Run sheet/i);
 });
 
 test("Guest View hides organizer controls", async ({ page }) => {
+  // The KPIs are on Overview and the inline editors on Budget: check the KPI here, then open Budget.
+  await expect(page.getByTestId("kpi-planned")).toBeVisible();
+  await openPage(page, "Budget");
+  // These are visible to the organizer first, so their absence below is a real check rather than a vacuous one.
+  const organizerOnly = [page.getByTestId("open-guest-links"), page.getByRole("button", { name: "More", exact: true }),
+    page.getByRole("button", { name: "Undo" }), page.getByRole("button", { name: /red flag/ }), page.getByRole("combobox", { name: "Event" }),
+    page.getByRole("button", { name: /^Edit planned amount for / }).first()];
+  for (const c of organizerOnly) await expect(c).toBeVisible();
   await page.getByRole("button", { name: "Guest View" }).click();
   await expect(page.getByRole("button", { name: "Guest View" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("button", { name: /Export CSV/ })).toHaveCount(0);
+  for (const c of organizerOnly) await expect(c).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Edit / })).toHaveCount(0);
   await expect(page.getByTestId("kpi-planned")).toHaveCount(0);
+  await expect(page.getByTestId("dashboard")).not.toContainText("₹");
   await expect(page.getByRole("button", { name: "Open Guest Concierge" })).toBeVisible();
 });
 
@@ -199,6 +225,7 @@ test("private sub-events stay off the public link until the organizer marks them
   expect(payloads.join("\n"), "private sub-event in the API payload").not.toContain("Haldi");
 
   // Organizer publishes the Haldi from the timeline; the public link picks it up after sync.
+  await openPage(page, "Schedule");
   const toggle = page.getByTestId("visibility-haldi");
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
   await toggle.click();
