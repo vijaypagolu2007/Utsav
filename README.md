@@ -9,8 +9,32 @@ reducer **computes**, and you **approve**. The LLM never does budget math or dat
 npm install
 cp .env.example .env.local   # add GEMINI_API_KEY (optional — without it the app runs in Demo Mode)
 npm run dev                  # http://localhost:3000
-npm run verify               # demo-output check + 526 unit + API + a11y tests + typecheck + lint (0 warnings) + production build
+npm run verify               # demo-output check + 584 unit + API + a11y tests + typecheck + lint (0 warnings) + production build
 ```
+
+## How Utsav answers the brief
+
+PromptWars Challenge 5 asks for a GenAI assistant that plans weddings, birthdays and community events, with budgets, timelines, vendor checklists and personalised ideas. Each part of the brief maps to a feature here, and to whether Gemini or deterministic code does the work.
+
+| The brief asks for | Where it lives | Gemini or code |
+|---|---|---|
+| Practical setup questions | `/setup`: event type, names, city, dates, guests, total budget, categories with your own ₹ or %, already-booked locks, and "What matters most" | Form. Code allocates blanks by largest remainder and keeps your amounts exact |
+| A budget you control | `/budget`: editable total, add and remove lines, locks, rebalance, per-guest lines | Code (integer paise, BigInt) |
+| Trade-offs, not uniform cuts | "Over budget? Fix by my priorities": cut-first, then flexible; must-protect is never cut | Code computes. Gemini explains the trade-offs in plain language |
+| Show the consequences of a decision | The what-if panel previews a category or guest-count change before you commit | Code |
+| Update the plan, don't restart it | "Our budget dropped by ₹50,000 and the event is 2 weeks earlier" becomes one approval card | Gemini picks `revise_plan`. Code moves the dates, cascades the tasks and makes the cuts |
+| Timelines and tasks | `/schedule` and `/tasks`: sub-event order rules, date cascades, priority and due-date order, "Blocked by …" | Code |
+| Vendor checklists and coordination | `/vendors`: a checklist per event type, stages, questions to ask, quote comparison, quote scanner | Gemini Vision reads quotes and drafts questions. Code converts money and compares quotes per guest |
+| Estimates clearly labelled | Estimate, Quoted, Committed and Unverified tags. Availability and prices are never claimed | Code |
+| Personalised ideas | `/ideas`: suggestions that fit what's left in the budget, refined with Cheaper, Kid-friendly or More traditional, then adopted as a task or budget line | Gemini, or the offline idea bank. Code checks that "cheaper" really is cheaper |
+| Culture, age, accessibility, preferences | Templates per event type (conditional Hindu wedding rituals, at-home birthdays, pandal sthapana, aarti and visarjan), guest diets, kid-friendly ideas, WCAG 2.2 AA UI | Config and code |
+| Guests | Shared guest links: RSVP, diets, wishlist; private sub-events stay hidden; no ₹ shown | Server-enforced allowlist |
+
+**Judging criteria**
+- **Security:** Zod at every boundary; trust tiers (auto, approve, draft-only); guest permissions enforced on the server; hashed organizer tokens; body caps and upload sniffing; redacted logs; rate limiting.
+- **Testing:** 584 unit and API tests, including mocked Gemini; 116 Playwright tests; a live Gemini smoke test.
+- **Efficiency:** one shared tool executor for Gemini and offline mode; bounded function-calling steps; spaced smoke checks; optimistic concurrency; no polling while idle.
+- **Accessibility:** axe on every page in light and dark at 320 to 1280 px; 24 px minimum targets; contrast unit-tested.
 
 ## Architecture
 
@@ -282,17 +306,19 @@ Target: WCAG 2.2 AA. Design tokens (stone surfaces, violet-700 primary, emerald/
 
 Upload limits: files ≤ 3 MB (Vercel's ~4.5 MB request cap minus base64 overhead).
 
-## 3-minute demo script
+## Demo walkthrough (about 4 minutes)
 
 | Time | Do | Point out |
 |---|---|---|
-| 0:00–0:20 | Open the Royal Wedding canvas. | Gemini proposes, a deterministic reducer computes in integer paise, the organizer approves. The badge shows Gemini or Offline honestly. |
-| 0:20–0:55 | Send *Cut ₹20k from decor and move the Haldi to Friday*. | Tier-1 diff: Haldi decor and Sangeet stage cut proportionally to unlocked slack (Mandap is locked), Haldi Thu→Fri, task due dates cascade. Click **Approve & Commit**; Planned drops by exactly ₹20,000. |
-| 0:55–1:20 | Send *Cut ₹1.5L from decor*. | Whole batch rolled back, plan unchanged, diagnostics show only ₹1,00,000 is cuttable, and a verified counter-offer card is ready to approve. |
-| 1:20–1:55 | Click **Scan sample quote** (or upload `samples/deccan-royal-caterers-quote.png` with a key). | ₹1,85,000 vs ₹1,50,000 planned: ₹35,000 over, deposit ₹50,000 due 2026-10-25, three red flags, **Approve & Update Budget**. The envelope is never raised silently. |
-| 1:55–2:25 | **Guest links → Publish**, open the Rao family link in a private window. | Public itinerary, venues, dress codes, RSVP buttons only for that household; no ₹ anywhere. Try a budget change via the API → `400`. RSVP *maybe*, then **Sync now** on the organizer. |
-| 2:25–2:45 | **⬇ Export CSV**, **🖨️ Print Run-Sheet**. | RFC 4180 ledger with totals; printable timeline with ⚓ anchored moments. |
-| 2:45–3:00 | Wrap up. | Gemini function calling + Vision with offline fallback; Zod at every boundary; reducer as the single source of truth; server-enforced guest permissions; optimistic concurrency. |
+| 0:00–0:35 | On a fresh browser, click **Plan my event**. Step through setup: a wedding in Hyderabad, 300 guests, ₹25L, Venue already booked, and "What matters most" (Catering and Venue protected, Decor cut first). | It asks practical questions first. Your amounts are kept exactly, every figure is labelled Estimate, and code does all the maths. |
+| 0:35–1:05 | Switch to the sample **Royal Wedding**. On Overview, open Needs attention. On `/budget`, use the what-if panel to change guests from 300 to 350. | Per-guest catering and return gifts move by rate × 50, and every other category is shown before and after. Commit it through an approval card. |
+| 1:05–1:35 | Click **Over budget? Fix by my priorities**. | One card lists each trade-off ("Decor −₹… to keep Catering and Venue intact"). Must-protect lines are never touched. |
+| 1:35–2:15 | On `/vendors`, open Photographer: **Questions to ask**, then **Compare 2 quotes**. Click **Scan sample quote**. | Per-guest cost, inclusions, extras and what's still unclear, side by side. The scanned quote is ₹35,000 over, has an overdue deposit, and comes as a Tier 1 card; the budget is never raised silently. |
+| 2:15–2:35 | Open `/tasks`. | Ordered by priority, then due date. "Blocked by Book venue", and a flag when a blocker slips. |
+| 2:35–3:00 | Open `/ideas` and click **Suggest ideas**, then **Cheaper alternative** and **Make it kid-friendly**. Adopt one that goes over budget. | The adopt card warns and offers "Add it and fix by my priorities". |
+| 3:00–3:30 | In the Co-Pilot, tap *Our budget dropped by ₹50,000 and the event is 2 weeks earlier*. Approve, then press Undo. | One card: the total drops ₹50,000, every date moves 14 days, overdue tasks are named, and the cuts follow priorities. It revises the plan instead of restarting it, and Undo restores everything. |
+| 3:30–3:50 | **Guest links → Publish**, then open a household link in a private window. | No ₹ anywhere, private sub-events are hidden, and the guest can RSVP and set diets. A budget change from a guest is refused with a 400. |
+| 3:50–4:10 | Switch to dark mode, then shrink to mobile width. | Same app on a 375 px phone with a bottom tab bar. Closing caption: Gemini proposes, code computes, you approve. |
 
 Manual setup for the demo: shared storage (Upstash on Vercel, or nothing locally since `next dev` uses the file store) for the guest-link step; a Gemini key only if you want to show live Gemini instead of Demo Mode.
 
@@ -305,5 +331,5 @@ Manual setup for the demo: shared storage (Upstash on Vercel, or nothing locally
 - PDFs are passed to Gemini as-is and are never parsed on the server.
 
 ## Status
-- ✅ Verified here: `npm run verify` (demo baseline, unit + API + security + concurrency tests, typecheck, lint, production build), manual HTTP checks against `next start` with the file store, and the full Playwright suite (103 tests) against `next start` with the E2E env and the distro Chromium.
-- ⏳ Needs your environment: a Playwright run on your own OS (Windows was not tested here), live Gemini chat / Vision (`npm run smoke:gemini`), Upstash-backed guest links and a deployed URL.
+- ✅ Sandbox: `npm run verify` (demo baseline, 584 unit, API, security and concurrency tests, typecheck, lint, production build) and the full Playwright suite (116 tests) against `next start` with the E2E env.
+- ✅ Windows (2026-10-23): verify, Playwright and `npm run smoke:gemini` PASS against live Gemini.
