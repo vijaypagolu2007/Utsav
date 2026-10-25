@@ -2,6 +2,8 @@
 
 A planning assistant for Indian weddings, birthdays and community events. It handles budgets, timelines, vendor checklists and personalised ideas. **Gemini proposes, code computes, you approve.** The LLM never does money or date maths.
 
+![Utsav Co-Pilot planning workspace](docs/screenshot.jpg)
+
 **Live:** https://utsav-event-planner-rho.vercel.app · **Technical reference:** [docs/TECHNICAL.md](docs/TECHNICAL.md)
 
 ## What it does
