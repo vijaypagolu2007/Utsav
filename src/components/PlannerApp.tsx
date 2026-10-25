@@ -29,8 +29,11 @@ import { kpiContext } from "@/kpis";
 import { publicCount } from "@/visibility";
 import ShareDialog from "./ShareDialog";
 import { useSharedEvent } from "./useSharedEvent";
+import { useCloudSync } from "./useCloudSync";
+import AccountMenu, { CloudChoiceDialog } from "./AccountMenu";
 import { PlannerContext, type PlannerState } from "./planner-context";
 
+type SyncStatusKey = string | null;
 export type Highlight = { ids: Set<string>; key: number };
 /** A link in a toast: "changed on another page" after an AI edit, undo or sync. */
 export type ToastLink = { href: string; label: string };
@@ -217,6 +220,17 @@ export default function PlannerApp({ children }: { children?: ReactNode }) {
 
   // ---------- shared guest links (server copy kept in sync; guest responses merged back in) ----------
   const shared = useSharedEvent(store.active, plan, merged => { const off = push(merged, "Synced guest responses"); toast("slate", "Guest responses synced", linksTo(off)); });
+
+  // ---------- optional Google sign-in: cloud copy of the active slot (local storage stays the working copy) ----------
+  // "Use cloud copy" replaces the plan on screen like loading a plan: the cloud copy was validated by the server's schema
+  // and again on arrival, it lands as one history step (so the device's plan is one Undo away), and nothing is merged.
+  const cloud = useCloudSync(store.active, plan, cloudPlan => { const off = push(cloudPlan, "Loaded cloud copy"); toast("slate", "Loaded the cloud copy", linksTo(off)); });
+  const [choiceOpen, setChoiceOpen] = useState(false);
+  const choicePending = cloud.status.state === "choose";
+  const [choiceSeen, setChoiceSeen] = useState<SyncStatusKey>(null);
+  const choiceKey: SyncStatusKey = cloud.status.state === "choose" ? `${cloud.status.reason}:${cloud.status.cloud.version}` : null;
+  // Each new choice opens the dialog once; closing it decides later (the account panel reopens it).
+  if (choiceKey !== choiceSeen) { setChoiceSeen(choiceKey); setChoiceOpen(!!choiceKey); }
 
   // ---------- chat ----------
   const setAction = (r: Role, msgId: string, actionId: string, patch: Partial<UIAction>) =>
@@ -452,7 +466,11 @@ export default function PlannerApp({ children }: { children?: ReactNode }) {
         launcher={<CopilotLauncher ref={launcherRef} open={copilotOpen} onOpen={() => setCopilotOpen(true)} title={copilotTitle} dialogId={copilotDialogId} guest={guest} />}
         nav={!guest && wide ? <PageTabs current={onSetup ? null : currentPage.id} /> : null}
         onNewPlan={() => router.push(SETUP_PATH)}
+        account={<AccountMenu cloud={cloud} onOpenChoice={() => setChoiceOpen(true)} />}
       />
+      <CloudChoiceDialog open={choiceOpen && choicePending && !guest} status={cloud.status} localTitle={plan.event.title}
+        onUseCloud={() => { setChoiceOpen(false); cloud.chooseCloud(); }} onKeepLocal={() => { setChoiceOpen(false); cloud.chooseLocal(); }}
+        onClose={() => setChoiceOpen(false)} />
       <ShareDialog open={shareOpen} onClose={() => setShareOpen(false)} share={shared.share} status={shared.status}
         onPublish={() => void shared.publish()} onSync={shared.syncNow} onForget={shared.forget} visibility={publicCount(plan)} />
       {/* The page scrolls as one document. The Co-Pilot launcher lives in the header, so nothing floats over content;

@@ -216,6 +216,7 @@ test.describe("returning user", () => {
 
   for (const scheme of ["light", "dark"] as const) {
     test(`axe (${scheme}): setup steps, /ideas with cards and the adopt approval card, /budget add form and rebalance preview`, async ({ page }) => {
+      test.slow();
       await page.emulateMedia({ colorScheme: scheme });
       for (const width of [1280, 375]) {
         await page.setViewportSize({ width, height: width < 768 ? 740 : 900 });

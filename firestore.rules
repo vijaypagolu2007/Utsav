@@ -1,0 +1,40 @@
+rules_version = '2';
+// Utsav cloud save (keyless). The app's server calls the Firestore REST API with the signed-in user's own Firebase ID
+// token, so these rules apply to every request. Owner-only: a user reaches only users/{their uid}/plans/{planKey}.
+// The server validates every plan with the full Zod schema first and assigns the version; these rules are the second
+// guard (shape, size, version + 1). Paste this file into Firebase console → Firestore Database → Rules → Publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid}/plans/{planKey} {
+      function isOwner() {
+        return request.auth != null && request.auth.uid == uid;
+      }
+      // Same pattern as PLAN_KEY in src/server/cloud-handler.ts.
+      function validKey() {
+        return planKey.matches('^[a-z0-9][a-z0-9-]{0,39}$');
+      }
+      // Exactly the fields the server writes; plan ≤ MAX_PLAN_BYTES (400 KiB, src/server/events.ts).
+      function validShape(d) {
+        return d.keys().hasOnly(['plan', 'version', 'updatedAt', 'title', 'eventType', 'schema'])
+          && d.keys().hasAll(['plan', 'version', 'updatedAt'])
+          && d.plan is string && d.plan.size() <= 409600
+          && d.version is int
+          && d.updatedAt is timestamp
+          && (!('title' in d) || (d.title is string && d.title.size() <= 200))
+          && (!('eventType' in d) || (d.eventType is string && d.eventType.size() <= 40))
+          && (!('schema' in d) || d.schema == 1);
+      }
+      allow read: if isOwner();
+      allow create: if isOwner() && validKey() && validShape(request.resource.data)
+        && request.resource.data.version == 1;
+      allow update: if isOwner() && validKey() && validShape(request.resource.data)
+        && resource.data.version is int
+        && request.resource.data.version == resource.data.version + 1;
+      allow delete: if false;
+    }
+    // Everything else is denied.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

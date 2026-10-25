@@ -29,6 +29,7 @@ const categoryTotal = async (page: Page, label: string) =>
   rupees(await page.getByRole("button", { name: `Edit ${label} planned total` }).locator("xpath=..").innerText());
 
 test("setup: the 'What matters most' step saves priorities and the level onto the new plan", async ({ page }) => {
+  test.slow(); // many steps plus a server round trip; slower machines need more than the default 45 s
   await page.goto("/");
   await page.getByTestId("welcome-plan").click();
   await page.getByLabel("City", { exact: true }).fill("Hyderabad");
@@ -51,7 +52,9 @@ test("setup: the 'What matters most' step saves priorities and the level onto th
   await page.getByRole("button", { name: "Next: budget" }).click();
   await expect(page.getByTestId("setup-step-2")).toBeVisible();
   await page.getByRole("button", { name: "Create my plan" }).click();
-  await expect(h1(page)).toHaveText(/Wedding/);
+  // Creating calls /api/plan; a server error would show as an alert on the form instead.
+  await expect(page.getByTestId("setup-step-2").getByRole("alert")).toHaveCount(0);
+  await expect(h1(page)).toHaveText(/Wedding/, { timeout: 30_000 });
   await page.goto("/budget");
   await expect(page.getByTestId("priority-catering-protect")).toBeChecked();
   await expect(page.getByTestId("priority-decor-cut_first")).toBeChecked();
@@ -273,6 +276,7 @@ test.describe("sample wedding", () => {
 
   for (const scheme of ["light", "dark"] as const) {
     test(`axe (${scheme}): /vendors with comparison and questions, /budget panels and fix card, /tasks dependencies, ideas refine`, async ({ page }) => {
+      test.slow();
       await page.emulateMedia({ colorScheme: scheme });
       for (const width of [1280, 375]) {
         await page.setViewportSize({ width, height: width < 768 ? 740 : 900 });

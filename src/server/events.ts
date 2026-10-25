@@ -40,6 +40,10 @@ export const RATE = {
   publicRead: { limit: 120, windowSec: 60 },
   guestWrite: { limit: 30, windowSec: 60 },
   organizerWrite: { limit: 120, windowSec: 60 },
+  // Signed-in cloud save (src/server/cloud-handler.ts): per IP before the ID token is checked, per user after.
+  cloudIp: { limit: 300, windowSec: 60 },
+  cloudRead: { limit: 120, windowSec: 60 },
+  cloudWrite: { limit: 60, windowSec: 60 },
 } as const;
 
 function storeOr503(): { store: EventStore } | { result: HandlerResult } {
@@ -48,7 +52,8 @@ function storeOr503(): { store: EventStore } | { result: HandlerResult } {
   return { store: s.store };
 }
 
-async function limited(store: EventStore, scope: keyof typeof RATE, who: string): Promise<HandlerResult | null> {
+/** Fixed-window rate limit in the shared store; a store outage never blocks the request (it is logged). */
+export async function limited(store: EventStore, scope: keyof typeof RATE, who: string): Promise<HandlerResult | null> {
   const r = RATE[scope];
   try {
     const n = await store.incr(`utsav:rl:${scope}:${who}`, r.windowSec);

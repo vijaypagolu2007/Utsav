@@ -24,12 +24,13 @@ A planning assistant for Indian weddings, birthdays and community events. It han
 - **Deterministic core:** a Zod 4 schema plus a pure reducer (`applyBatch`) in integer paise. Every change is validated, dry-run, shown as a before-and-after diff, and undoable.
 - **Trust tiers:** small changes apply automatically, large ones need your approval, and messages are only ever drafts you send yourself.
 - **Demo Mode:** the same tools run offline without a key, labelled as offline.
+- **Optional Google sign-in:** Firebase Auth plus cloud save of your plans to Firestore through the server (verified tokens, owner-only rules, versioned saves, you choose on a conflict). Keyless: no server secrets, just the four `NEXT_PUBLIC_FIREBASE_*` values ([setup](docs/TECHNICAL.md#optional-google-sign-in-and-cloud-save-firebase)). Without it, plans stay on the device.
 - **Stack:** Next.js 16, Tailwind v4, Upstash Redis (shared guest links) and Vercel.
 
 ## Quality
 
 - **Security:** Zod at every boundary; guest permissions enforced on the server; hashed organizer tokens; body caps and upload sniffing; redacted logs; rate limiting.
-- **Testing:** 584 unit and API tests (Gemini mocked), 116 Playwright end-to-end tests, and a live Gemini smoke test.
+- **Testing:** 648 unit and API tests (Gemini mocked), 124 Playwright end-to-end tests, and a live Gemini smoke test.
 - **Accessibility:** WCAG 2.2 AA target, axe on every page in light and dark from 320 to 1280 px, contrast unit-tested, 24 px minimum targets.
 
 ## Run it

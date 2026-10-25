@@ -136,6 +136,9 @@ describe("Utsav palette (ivory sand surfaces, kumkum primary, maroon / peacock /
     ["brand-800", "brand-50"], ["red-700", "surface-muted"], ["emerald-800", "surface"], ["ink", "peacock-50"],
     // Overview hero: heading text on the glow tints themselves (the worst point of each radial gradient).
     ["ink", "marigold-100"], ["ink-muted", "marigold-100"], ["ink", "brand-50"], ["ink-muted", "brand-50"], ["ink-muted", "maroon-50"], ["ink-muted", "peacock-50"],
+    // v7: account control and cloud choice dialog (status chip tones, avatar initial, sign-in error, the two version cards).
+    ["emerald-800", "emerald-50"], ["amber-800", "amber-50"], ["sand-700", "surface-muted"], ["white", "brand-700"], ["red-700", "surface"],
+    ["ink", "surface-muted"], ["ink-muted", "surface-muted"], ["sand-800", "surface"], ["white", "primary"],
   ];
   for (const [fg, bg] of text) test(`text ${fg} on ${bg} ≥ 4.5:1`, () => {
     const r = ratio(shade(fg), shade(bg));
@@ -154,6 +157,8 @@ describe("Utsav palette (ivory sand surfaces, kumkum primary, maroon / peacock /
     ["emerald-600", "emerald-50"], ["red-600", "red-50"], ["marigold-500", "sand-800"],
     // v5: setup checkboxes and the selected event-type card border (brand-700), the ideas Lightbulb (marigold-700).
     ["brand-700", "brand-50"], ["marigold-700", "white"], ["line-strong", "sand-50"],
+    // v7: the cloud / device icons on the version cards and the status chip icons.
+    ["peacock-700", "surface-muted"], ["brand-700", "surface-muted"], ["emerald-800", "emerald-50"], ["amber-800", "amber-50"],
   ];
   for (const [fg, bg] of ui) test(`UI ${fg} on ${bg} ≥ 3:1`, () => {
     const r = ratio(shade(fg), shade(bg));

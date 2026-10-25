@@ -434,17 +434,23 @@ describe("shared guest links", () => {
 });
 
 describe("secrets stay on the server", () => {
-  test("no client component imports server code or reads GEMINI_API_KEY; no NEXT_PUBLIC secrets", () => {
+  test("no client component imports server code or firebase-admin or reads a server secret; no NEXT_PUBLIC secrets", () => {
     const files: string[] = [];
     const walk = (d: string) => { for (const f of readdirSync(d)) { const p = path.join(d, f); if (statSync(p).isDirectory()) walk(p); else if (/\.(tsx?|mjs)$/.test(f)) files.push(p); } };
     walk("src");
+    assert.ok(files.some(f => f.endsWith(path.join("components", "cloud-auth.ts"))) && files.some(f => f.endsWith("firebase-token.ts")), "the scan sees the v7 files");
     for (const f of files) {
       const s = readFileSync(f, "utf8");
       if (/^["']use client["']/.test(s)) {
         assert.ok(!/@\/server\/|\.\.\/server\//.test(s), `${f} imports server code`);
         assert.ok(!/GEMINI_API_KEY|UPSTASH|KV_REST/.test(s), `${f} references a server secret`);
+        // v7: no Admin SDK and no service account in client code (the server is keyless too).
+        assert.ok(!/firebase-admin/.test(s), `${f} imports firebase-admin`);
+        assert.ok(!/FIREBASE_PRIVATE_KEY|FIREBASE_CLIENT_EMAIL|process\.env\.FIREBASE_/.test(s), `${f} references the Firebase service account`);
       }
-      assert.ok(!/NEXT_PUBLIC_(GEMINI|UPSTASH|KV)/.test(s), `${f} exposes a secret via NEXT_PUBLIC`);
+      assert.ok(!/NEXT_PUBLIC_(GEMINI|UPSTASH|KV|FIREBASE_PRIVATE|FIREBASE_CLIENT_EMAIL)/.test(s), `${f} exposes a secret via NEXT_PUBLIC`);
+      // Keyless cloud save: nothing loads the Admin SDK any more, on the server or in the browser.
+      assert.ok(!/from ["']firebase-admin|import\(["']firebase-admin/.test(s), `${f} loads firebase-admin`);
     }
   });
 });

@@ -7,7 +7,9 @@ const securityHeaders = [
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "no-referrer" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
-  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+  // same-origin-allow-popups (not same-origin): the optional Google sign-in uses Firebase's signInWithPopup, which needs
+  // to keep a handle on the popup window it opens. Still isolates this page from any other opener.
+  { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
   { key: "Content-Security-Policy", value: "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'" },
 ];
 

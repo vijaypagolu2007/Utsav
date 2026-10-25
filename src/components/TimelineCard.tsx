@@ -138,7 +138,7 @@ export default function TimelineCard({ plan, commit, highlight }: { plan: AgentS
                       </InlineEdit>
                       {s.isMain ? <Chip tone="primary" icon={<Star size={12} />}>Main event</Chip> : <Badge tone={phaseTone(s.phase)} className="capitalize">{s.phase}</Badge>}
                     </div>
-                    <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink-muted">
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink-muted">
                       {/* Start time: move_sub_event on the same date keeps the duration and shifts its unanchored blocks with it. */}
                       <InlineEdit label={`start time of ${s.name}`} kind="time" value={hhmm24(s.startMin)} inputSize="w-32" hint="Keeps the duration; unanchored blocks move with it"
                         onSave={(min: number) => min === s.startMin ? null : saveWith(commit, { summary: `${s.name} starts at ${hhmm(min)}`,
@@ -147,7 +147,7 @@ export default function TimelineCard({ plan, commit, highlight }: { plan: AgentS
                       </InlineEdit>
                       {s.venue && <span className="flex items-center gap-1"><MapPin size={14} aria-hidden="true" />{s.venue}</span>}
                       {s.dressCode && <span className="flex items-center gap-1"><Shirt size={14} aria-hidden="true" />{s.dressCode}</span>}
-                    </p>
+                    </div>
                   </div>
                   <button type="button" data-testid={`visibility-${s.slug}`} aria-pressed={pub}
                     title={pub ? "Shown on the public guest link. Click to hide it (invited households still see it)." : "Only invited households see this on guest links. Click to show it publicly."}

@@ -21,6 +21,8 @@ type Props = {
   nav?: ReactNode;
   /** Open the setup form for a brand-new plan. */
   onNewPlan: () => void;
+  /** Optional Google sign-in and cloud status (renders nothing when sign-in isn't configured). */
+  account?: ReactNode;
 };
 
 /** Close a popover on Escape (returning focus to `trigger`) or on a pointer press outside `trigger` and `box`. */
@@ -98,7 +100,7 @@ function MoreMenu({ items, children }: { items: MenuItem[]; children: ReactNode 
 }
 
 export default function CommandBar({ plan, today, setToday, insights, activeTemplate, storedTitles, onSwitch, onReset, role, setRole,
-  history, historyIdx, goTo, showInsight, onExportCsv, onExportRunSheet, onShare, shared, launcher, nav, onNewPlan }: Props) {
+  history, historyIdx, goTo, showInsight, onExportCsv, onExportRunSheet, onShare, shared, launcher, nav, onNewPlan, account }: Props) {
   const [flagsOpen, setFlagsOpen] = useState(false);
   const flagsId = useId(), dateHintId = useId(), dateId = useId();
   const flagsBtn = useRef<HTMLButtonElement>(null);
@@ -193,6 +195,7 @@ export default function CommandBar({ plan, today, setToday, insights, activeTemp
                 <Link2 size={16} aria-hidden="true" className="text-peacock-700" /> <span className="whitespace-nowrap max-sm:sr-only">Guest links</span>
                 {shared && <span className="rounded-full bg-emerald-50 px-1.5 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-300">live</span>}
               </button>
+              {account}
               <MoreMenu items={menuItems}>
                 <div role="group" aria-label="Planning and history" className="space-y-3 px-2 py-1.5">
                   <div>

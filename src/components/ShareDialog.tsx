@@ -61,11 +61,13 @@ function ShareDialogOpen({ onClose, share, status, onPublish, onSync, onForget, 
     if (!d) return;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (!d.open) d.showModal();
+    // React Strict Mode (dev) runs this effect twice: the cleanup's close() queues a "close" event that lands after the
+    // second showModal(), so the dialog's onClose ignores a close event that arrives while the dialog is open again.
     return () => { if (d.open) d.close(); if (opener?.isConnected) opener.focus(); };
   }, []);
   const origin = typeof window === "undefined" ? "" : window.location.origin;
   return (
-    <dialog ref={ref} aria-labelledby="share-title" onClose={onClose}
+    <dialog ref={ref} aria-labelledby="share-title" onClose={() => { if (!ref.current?.open) onClose(); }}
       onPointerDown={e => { downOnBackdrop.current = e.target === e.currentTarget; }}
       onClick={e => { if (downOnBackdrop.current && e.target === e.currentTarget) onClose(); downOnBackdrop.current = false; }}
       className="m-auto max-h-[min(85dvh,100%)] w-[calc(100%-2rem)] max-w-xl overflow-hidden rounded-2xl border border-line bg-surface p-0 text-ink shadow-xl backdrop:bg-sand-900/40">

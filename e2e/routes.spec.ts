@@ -68,6 +68,9 @@ for (const r of ROUTES) {
     for (const o of ROUTES) if (o.section !== r.section) await expect(page.locator(`section#${o.section}`)).toHaveCount(0);
     await expect(nav(page).getByRole("link", { name: r.name, exact: true })).toHaveAttribute("aria-current", "page");
     await expect(nav(page).locator("[aria-current]")).toHaveCount(1);
+    // Valid nesting (a <div> inside a <p> is a React hydration error in dev): no block element inside a paragraph.
+    const badNesting = await page.locator("p div, p section, p ul, p ol, p table, p h2, p h3, p p").count();
+    expect(badNesting, `block elements inside <p> on ${r.path}`).toBe(0);
   });
 }
 
@@ -250,6 +253,7 @@ test("mobile tab bar routes between pages and the open page's heading is never u
 // ---------- accessibility and layout on every route ----------
 for (const scheme of ["light", "dark"] as const) {
   test(`axe (${scheme}): every route, at 1280px and 375px, has no WCAG 2.2 A/AA violations and no target under 24px`, async ({ page }) => {
+    test.slow();
     await page.emulateMedia({ colorScheme: scheme });
     for (const width of [1280, 375]) {
       await page.setViewportSize({ width, height: width < 768 ? 740 : 900 });
