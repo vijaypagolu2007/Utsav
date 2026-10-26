@@ -2,7 +2,9 @@
 // parsers turn the flagship prompts into the very same tool calls Gemini would emit, so the demo never breaks.
 import type { AgentState, BudgetCategory } from "./schema";
 import { type CommandInput, addDays, rupees, weekdayOf, Weekday, findSubEvent } from "./commands";
-import { householdOf, visibleSubEventIds } from "./visibility";
+import { ANSWER_LABEL, MEAL_LABEL, rsvpFunctions, type RsvpCounts } from "./rsvp";
+import type { RsvpAnswer, RsvpMeal } from "./schema";
+import { visibleSubEventIds } from "./visibility";
 import type { InitializeEventPlanInput } from "./blueprint";
 import { executeAgentTool, type AgentAction, type ChatResponse } from "./agent";
 import { computePlanInsights } from "./insights";
@@ -10,6 +12,7 @@ import { demoIdeas, demoRefine, IDEA_KINDS, kindsIn, type Refine } from "./ideas
 import { buildPriorityFix, buildRevision, planPriorityCut, cutCommands, explainCut } from "./priorities";
 import { checklistFor } from "./config/vendor-checklist";
 import { blueprintFromSetup, defaultSetupCategories } from "./setup";
+import { parsePasteList } from "./guest-import";
 
 // ---------- amount & phrase parsing ----------
 /** "₹20k" → 2000000, "1.5L" → 15000000, "₹25,000" → 2500000, "2 crore" → 2000000000 (all paise). */
@@ -355,10 +358,28 @@ export function parseShiftDays(text: string): number | null {
 }
 
 /** The offline brain: same tools, deterministic parsing. */
+/** v8 Part 0c: "delete this event", "please remove the whole plan" (the whole request, so "remove the decor line" never matches). */
+export const DELETE_EVENT_RE = /^\s*(?:please\s+)?(?:delete|remove|trash)\s+(?:this|the|my|our)\s+(?:whole\s+|entire\s+)?(?:event|plan)\b[\s.!]*(?:please)?[\s.!]*$/i;
+
 export function runOfflineAgent(st: AgentState, text: string, today: string): ChatResponse {
   const actions: AgentAction[] = [];
   const t = text.trim();
   const lower = t.toLowerCase();
+
+  // v8 Part 0c: a Tier 2 card. Nothing is deleted until the organizer approves it and confirms in the app.
+  if (DELETE_EVENT_RE.test(t)) {
+    const r = executeAgentTool("apply_plan_changes", { summary: `Delete ${st.event.title}`, commands: [{ op: "delete_event" }] }, st, today);
+    actions.push(...r.actions);
+    return { mode: "offline", actions, reply: `I can't delete anything myself. Approve the card and confirm, and "${st.event.title}" moves to Recently deleted, where you can restore it for 30 days.` };
+  }
+
+  // v8 Part 1c: headcount questions are answered from the read-only tool (counts computed in code), never guessed.
+  const rsvp = runOfflineRsvp(st, t, today);
+  if (rsvp) return rsvp;
+
+  // v8 Part 1: the guest list and gifts, each one approval card (the same commands Gemini emits).
+  const guestList = runOfflineGuestList(st, t, today);
+  if (guestList) return guestList;
 
   // Ideas and advice: "give me sangeet ideas", "eco-friendly return gift ideas under ₹50k"
   if (/\b(ideas?|inspiration|suggestions?|suggest)\b/i.test(t) && !/\b(switch to|plan an?|create an?|set up an?)\b/i.test(t)) {
@@ -500,6 +521,89 @@ export function runOfflineAgent(st: AgentState, text: string, today: string): Ch
     "Offline demo mode understands: budget cuts/top-ups (\"cut ₹20k from decor\"), moves (\"move the Haldi to Friday\"), \"what's overdue?\", ideas (\"give me decor ideas\"), \"rebalance to my total\", drafts (\"draft a sponsor pitch\"), and new plans (\"plan a 30th arcade birthday in Mumbai for ₹1.5L\"). Add a GEMINI_API_KEY for free-form chat." };
 }
 
+// ---------- v8 Part 1: guest list, join requests and gifts (offline, deterministic) ----------
+/** "add these guests: Ravi 98480 12345, Sita - 98765 43210", "import guests:\n…", "add guest Priya +91 9…". */
+export const ADD_GUESTS_RE = /^\s*(?:please\s+)?(?:add|import|invite)\s+(?:these|the following|this|my)?\s*(?:guests?|people|contacts?|names?)\s*(?:to the (?:guest )?list)?\s*[:\-–]?\s*([\s\S]+)$/i;
+/** "add a wishlist item: Lego set ₹2,500 https://…", "add a gift Dinner set to the registry". */
+export const ADD_GIFT_RE = /^\s*(?:please\s+)?add\s+(?:an?\s+)?(?:(?:wishlist|registry|gift)\s+(?:item|gift)|gift|wish)\s*[:\-–]?\s*(.+?)(?:\s+to\s+the\s+(?:wishlist|registry|gift registry))?\s*$/i;
+export const APPROVE_JOINS_RE = /^\s*(?:please\s+)?(approve|accept|reject|decline)\s+(?:all\s+)?(?:the\s+)?(?:pending\s+)?(?:group\s+)?(?:join\s+)?requests?\b/i;
+
+function runOfflineGuestList(st: AgentState, t: string, today: string): ChatResponse | null {
+  const actions: AgentAction[] = [];
+  const joins = APPROVE_JOINS_RE.exec(t);
+  if (joins) {
+    const pending = st.joinRequests.filter(r => r.status === "pending").slice(0, 20);
+    if (!pending.length) return { mode: "offline", actions, reply: "No join requests are waiting. Share the group join link from the Guests page and new requests will show up there." };
+    const approve = /approve|accept/i.test(joins[1]!);
+    const r = executeAgentTool("apply_plan_changes", { summary: `${approve ? "Approve" : "Decline"} ${pending.length} join request${pending.length === 1 ? "" : "s"}`,
+      commands: pending.map(p => approve ? { op: "approve_join_request", requestId: p.id } : { op: "reject_join_request", requestId: p.id }) }, st, today);
+    actions.push(...r.actions);
+    const res = r.response as { ok: boolean; reason?: string };
+    return { mode: "offline", actions, reply: res.ok
+      ? `${approve ? "Approving" : "Declining"} ${pending.map(p => p.name).join(", ")}: approve the card to commit.${approve ? " Each becomes a household with its own private RSVP link after the next sync." : ""}`
+      : `I couldn't do that: ${res.reason}` };
+  }
+  const gift = ADD_GIFT_RE.exec(t);
+  if (gift && (st.event.ext.type === "birthday" || st.event.ext.type === "wedding")) {
+    let rest = gift[1]!;
+    const url = rest.match(/https:\/\/\S+/)?.[0]?.replace(/[),.]+$/, "");
+    if (url) rest = rest.replace(url, " ");
+    if (/\bhttp:\/\//i.test(rest)) return { mode: "offline", actions, reply: "Gift links must start with https://. Send it again with a secure link (or without one)." };
+    const priority = /\b(most wanted|top|high(?: priority)?|must)\b/i.test(rest) ? "high" as const : /\blow(?: priority)?\b/i.test(rest) ? "low" as const : undefined;
+    rest = rest.replace(/\b(most wanted|top priority|high priority|low priority|priority)\b/gi, " ");
+    const amt = rest.match(/(?:₹|rs\.?\s*|inr\s*)\d[\d,]*(?:\.\d+)?\s*(?:k|thousand|lakhs?|l)?\b|\b\d[\d,]*(?:\.\d+)?\s*(?:k|thousand|lakhs?|l)\b/i)?.[0];
+    if (amt) rest = rest.replace(amt, " ");
+    const paise = amt ? parseAmountPaise(amt) : null;
+    const item = rest.replace(/\b(?:for|about|around|approx(?:imately)?|costs?|at|of)\s*$/i, "").replace(/[\s,;:–-]+$/g, "").replace(/^[\s,;:–-]+/, "").replace(/\s+/g, " ").trim();
+    if (!item) return { mode: "offline", actions, reply: "What's the gift called? For example: \"add a wishlist item: Lego Technic set ₹4,000\"." };
+    const r = executeAgentTool("apply_plan_changes", { summary: `Add "${item}" to the ${st.event.ext.type === "wedding" ? "gift registry" : "wishlist"}`,
+      commands: [{ op: "add_wishlist_item", item, ...(url ? { url } : {}), ...(paise !== null ? { approxRupees: Math.round(paise / 100) } : {}), ...(priority ? { priority } : {}) }] }, st, today);
+    actions.push(...r.actions);
+    const res = r.response as { ok: boolean; reason?: string };
+    return { mode: "offline", actions, reply: res.ok ? `Here's "${item}" for the ${st.event.ext.type === "wedding" ? "registry" : "wishlist"}: approve the card to add it. I never open the link; guests just see it.` : `I couldn't add that gift: ${res.reason}` };
+  }
+  const guests = ADD_GUESTS_RE.exec(t);
+  if (guests) {
+    const parsed = parsePasteList(guests[1]!.replace(/,\s*(?=[^\d\s+,])(?=[\p{L}])/gu, ";").replace(/\s+and\s+(?=\p{L})/giu, ";"));
+    if (!parsed.entries.length) return { mode: "offline", actions, reply: "I couldn't find any names there. Put one guest per line, like \"Ravi Kumar, +91 98480 12345\"." };
+    const r = executeAgentTool("apply_plan_changes", { summary: `Import ${parsed.entries.length} guest${parsed.entries.length === 1 ? "" : "s"}`,
+      commands: [{ op: "import_guests", source: "ai", entries: parsed.entries }] }, st, today);
+    actions.push(...r.actions);
+    const res = r.response as { ok: boolean; reason?: string; log?: string[] };
+    const skipped = parsed.issues.length ? ` ${parsed.issues.length} line${parsed.issues.length === 1 ? "" : "s"} had no name and ${parsed.issues.length === 1 ? "was" : "were"} left out.` : "";
+    return { mode: "offline", actions, reply: res.ok ? `${(res.log ?? []).join(". ").replace(/^Imported/, "Ready to import")}.${skipped} Approve the card to add them; each household gets its own private RSVP link.` : `I couldn't import those: ${res.reason}.${skipped}` };
+  }
+  return null;
+}
+
+// ---------- v8 Part 1c: RSVP headcounts and the organizer's RSVP settings (offline) ----------
+const MEAL_WORDS: [RegExp, RsvpMeal][] = [[/\bnon[- ]?veg(etarian)?\b/i, "non_veg"], [/\bjain\b/i, "jain"], [/\bveg(etarian)?\b/i, "veg"]];
+const mealIn = (t: string): RsvpMeal | null => MEAL_WORDS.find(([re]) => re.test(t))?.[1] ?? null;
+function runOfflineRsvp(st: AgentState, t: string, today: string): ChatResponse | null {
+  const actions: AgentAction[] = [];
+  // "close RSVPs on 2027-03-01 at 18:00": one approval card; the tool converts the IST date and time.
+  const close = t.match(/\b(?:close|closes|closing)\b[^.]*?\brsvps?\b[^.]*?\b(\d{4}-\d{2}-\d{2})(?:[^.]*?\b([01]\d|2[0-3]):([0-5]\d))?/i)
+    ?? t.match(/\brsvps?\b[^.]*?\b(?:close|closes|closing)\b[^.]*?\b(\d{4}-\d{2}-\d{2})(?:[^.]*?\b([01]\d|2[0-3]):([0-5]\d))?/i);
+  if (close) {
+    const r = executeAgentTool("apply_plan_changes", { summary: "Set the RSVP close date", commands: [{ op: "set_rsvp_settings", closesOn: close[1], ...(close[2] ? { closesTime: `${close[2]}:${close[3]}` } : {}) }] }, st, today);
+    actions.push(...r.actions);
+    const res = r.response as { ok: boolean; reason?: string; log?: string[] };
+    return { mode: "offline", actions, reply: res.ok ? `${(res.log ?? []).join(". ")}. Approve the card to apply it.` : `I couldn't set that: ${res.reason}` };
+  }
+  if (!/\b(how many|head ?count|count|rsvps?|coming|attending)\b/i.test(t) || !/\b(how many|head ?count|count|total|numbers?)\b/i.test(t)) return null;
+  const r = executeAgentTool("get_rsvp_counts", {}, st, today);
+  const c = r.response as unknown as Pick<RsvpCounts, "totalEntries" | "coming" | "maybe" | "notComing" | "possibleDuplicates"> & { perFunction: { slug: string; name: string; coming: number; kids: number | null; meals: Record<RsvpMeal, number>; maybe: number }[]; mealsComing: Record<RsvpMeal, number> };
+  const lower = t.toLowerCase();
+  const fn = c.perFunction.find(f => lower.includes(f.name.toLowerCase()) || lower.includes(f.slug));
+  const meal = mealIn(t);
+  const dupNote = c.possibleDuplicates ? ` (${c.possibleDuplicates} possible duplicate${c.possibleDuplicates === 1 ? "" : "s"} still to sort out on the Guests page)` : "";
+  if (!c.totalEntries) return { mode: "offline", actions, reply: "No RSVPs yet. Share the RSVP link from the Guests page; the counts update as answers come in." };
+  if (fn && meal) return { mode: "offline", actions, reply: `${fn.meals[meal]} ${MEAL_LABEL[meal].toLowerCase()} for ${fn.name} (coming RSVPs only; ${fn.maybe} more say maybe)${dupNote}.` };
+  if (fn) return { mode: "offline", actions, reply: `${fn.coming} coming for ${fn.name}: ${(["veg", "non_veg", "jain"] as const).map(m => `${fn.meals[m]} ${MEAL_LABEL[m].toLowerCase()}`).join(", ")}${fn.kids !== null ? `, ${fn.kids} kids` : ""}. ${fn.maybe} maybe, not counted${dupNote}.` };
+  if (meal) return { mode: "offline", actions, reply: `${c.mealsComing[meal]} ${MEAL_LABEL[meal].toLowerCase()} across the event (each coming family once). Per function: ${c.perFunction.map(f => `${f.name} ${f.meals[meal]}`).join(", ")}${dupNote}.` };
+  return { mode: "offline", actions, reply: `${c.coming.people} people coming in ${c.coming.entries} RSVP${c.coming.entries === 1 ? "" : "s"}, ${c.maybe.people} maybe (not counted), ${c.notComing.entries} not coming. By function: ${c.perFunction.map(f => `${f.name} ${f.coming}`).join(", ")}${dupNote}.` };
+}
+
 // ---------- Guest / Committee Concierge (offline) ----------
 const hm = (m: number) => `${((Math.floor(m / 60) + 11) % 12) + 1}:${String(m % 60).padStart(2, "0")} ${m < 720 ? "AM" : "PM"}`;
 const longDate = (d: string) => new Date(d + "T00:00:00Z").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
@@ -518,19 +622,24 @@ function mentionedSubEvents(st: AgentState, t: string, visible?: Set<string>) {
 }
 
 /** Read-only concierge with guest-safe writes. Everything still goes through applyBatch with role "guest". */
-export function runOfflineGuestAgent(st: AgentState, text: string, today: string, actingGuestId: string | null): ChatResponse {
+export function runOfflineGuestAgent(st: AgentState, text: string, today: string, actingEntryId: string | null): ChatResponse {
   const t = text.trim();
   const lower = t.toLowerCase();
   const actions: AgentAction[] = [];
   const run = (summary: string, commands: CommandInput[]) => {
-    const r = executeAgentTool("apply_plan_changes", { summary, commands }, st, today, "guest");
+    const r = executeAgentTool("apply_plan_changes", { summary, commands }, st, today, "guest", "gemini", { actingEntryId });
     actions.push(...r.actions);
     return r.response as { ok: boolean; reason?: string; log?: string[] };
   };
-  const me = actingGuestId ? st.guests.find(g => g.id === actingGuestId) ?? null : null;
-  const visible = visibleSubEventIds(st, householdOf(st, actingGuestId));
+  // v8 Part 1c: the concierge speaks for the acting RSVP entry only (Guest View), and sees what the RSVP link shows.
+  const me = actingEntryId ? st.rsvpEntries.find(e => e.id === actingEntryId && !e.removedAt && !e.mergedInto) ?? null : null;
+  const visible = new Set([...visibleSubEventIds(st, []), ...rsvpFunctions(st).map(s => s.id)]);
 
   // Organiser-only requests are sent to the reducer anyway, so the boundary (not the parser) says no.
+  if (DELETE_EVENT_RE.test(t)) {
+    const res = run("Guest request", [{ op: "delete_event" }]);
+    return { mode: "offline", actions, reply: res.reason ?? "Only the organizer can delete the event." };
+  }
   const organiserClauses = t.split(/\s*(?:,|;|\band\b)\s*/i).map(c => parseClause(st, c)).filter((c): c is CommandInput => c !== null && c.op !== "set_task_status");
   if (organiserClauses.length) {
     const res = run("Guest request", organiserClauses);
@@ -550,7 +659,7 @@ export function runOfflineGuestAgent(st: AgentState, text: string, today: string
     const want = words(t);
     const item = [...ext.wishlist].map(w => ({ w, score: [...words(w.item)].filter(x => want.has(x)).length })).sort((a, b) => b.score - a.score)[0];
     if (!item || item.score === 0) return { mode: "offline", actions, reply: `Which gift? The wishlist has ${ext.wishlist.map(w => w.item).join(", ")}.` };
-    if (!me) return { mode: "offline", actions, reply: "Pick who you are in the RSVP card first, then I can claim it for you." };
+    if (!me) return { mode: "offline", actions, reply: "Send your RSVP on the form first, then I can claim it for you." };
     const res = run(`${me.name} claims ${item.w.item}`, [{ op: "claim_wishlist_item", itemId: item.w.id, guestId: me.id }]);
     return { mode: "offline", actions, reply: res.ok ? `Done! "${item.w.item}" is claimed for you, ${me.name}. Nobody else can take it now.` : `I couldn't claim it: ${res.reason}` };
   }
@@ -571,29 +680,22 @@ export function runOfflineGuestAgent(st: AgentState, text: string, today: string
     return { mode: "offline", actions, reply: res.ok ? `You're on the volunteer list, ${name}${se ? ` for ${se.name} (${longDate(se.date)})` : ""}. See you at the briefing!` : `Couldn't sign up: ${res.reason}` };
   }
 
-  // RSVPs (+ dietary meals)
-  const answer = /\b(not attending|can'?t (make|come)|decline|won'?t|no to)\b/i.test(t) ? "no" : /\bmaybe|not sure|tentative\b/i.test(t) ? "maybe"
-    : /\b(attend|attending|coming|yes|rsvp|confirm|will be there)\b/i.test(t) ? "yes" : null;
-  if (answer && st.guests.length) {
-    const hhWord = t.match(/(?:the\s+)?([A-Z][a-z]+)\s+(?:household|family)/)?.[1];
-    const hh = hhWord ? st.households.find(h => h.label.toLowerCase().includes(hhWord.toLowerCase())) : undefined;
-    const named = st.guests.filter(g => lower.includes(g.name.toLowerCase()));
-    const guests = hh ? st.guests.filter(g => g.householdId === hh.id) : named.length ? named : me ? [me] : [];
-    if (!guests.length) return { mode: "offline", actions, reply: hhWord ? `I couldn't find a ${hhWord} household on the list.` : "Pick who you are in the RSVP card first, or name the household." };
-    let subs = mentionedSubEvents(st, t, visible);
-    if (!subs.length || /\ball\b|everything/i.test(t)) subs = st.subEvents.filter(s => guests.some(g => s.id in g.rsvp));
-    const commands: CommandInput[] = guests.flatMap(g => subs.map(s => ({ op: "set_rsvp" as const, guestId: g.id, subEvent: s.slug, answer })));
-    const meals = t.match(/(\d+)\s+([a-z-]+)\s+meals?/i);
-    if (meals) {
-      const n = Math.min(Number(meals[1]), guests.length), diet = meals[2]!.toLowerCase();
-      const already = guests.filter(g => g.diet.includes(diet));
-      const pick = [...already, ...guests.filter(g => !g.diet.includes(diet))].slice(0, n);
-      for (const g of pick) commands.push({ op: "set_guest_diet", guestId: g.id, diet: [diet] });
-    }
-    const who = hh ? hh.label : guests.map(g => g.name).join(" & ");
-    const res = run(`${who}: ${answer} for ${subs.map(s => s.name).join(" & ")}`, commands);
+  // RSVPs (+ meal): the acting guest's own RSVP entry, updated in one submit_rsvp_entry.
+  const answer: RsvpAnswer | null = /\b(not attending|can'?t (make|come)|decline|won'?t|no to)\b/i.test(t) ? "not_coming" : /\bmaybe|not sure|tentative\b/i.test(t) ? "maybe"
+    : /\b(attend|attending|coming|yes|rsvp|confirm|will be there)\b/i.test(t) ? "coming" : null;
+  if (answer) {
+    if (!me) return { mode: "offline", actions, reply: "Fill in the RSVP form first (your name and how many of you are coming); then I can change it for you." };
+    const open = rsvpFunctions(st);
+    const named = mentionedSubEvents(st, t, visible).filter(s => open.some(o => o.id === s.id));
+    const all = /\ball\b|everything/i.test(t);
+    const fns = answer === "not_coming" ? [] : all ? open.map(s => s.id) : named.length ? [...new Set([...me.functions, ...named.map(s => s.id)])] : me.functions.length ? me.functions : open.map(s => s.id);
+    const meal = mealIn(t) ?? me.meal;
+    const slugs = fns.map(id => st.subEvents.find(s => s.id === id)!.slug);
+    const res = run(`${me.name}: ${ANSWER_LABEL[answer]}`, [{ op: "submit_rsvp_entry", entryId: me.id, name: me.name, partySize: me.partySize, ...(me.kids !== null ? { kids: me.kids } : {}),
+      functions: slugs, meal, answer }]);
+    const names = fns.map(id => st.subEvents.find(s => s.id === id)!.name);
     return { mode: "offline", actions, reply: res.ok
-      ? `Done. ${who} is marked ${answer === "yes" ? "attending" : answer} for ${subs.map(s => s.name).join(" and ")}${meals ? ` with ${meals[1]} ${meals[2]} meal${Number(meals[1]) > 1 ? "s" : ""}` : ""}.`
+      ? `Done. ${me.name} (${me.partySize}) is ${ANSWER_LABEL[answer].toLowerCase()}${names.length ? ` for ${names.join(" and ")}` : ""}${answer !== "not_coming" ? `, ${MEAL_LABEL[meal].toLowerCase()} meal` : ""}.`
       : `I couldn't update that: ${res.reason}` };
   }
 

@@ -13,16 +13,17 @@ type LauncherProps = {
 };
 
 /**
- * The one Co-Pilot launcher, docked in the header so it never sits on top of page content.
- * Icon + label from 640px, icon-only below (the accessible name stays "Open AI Co-Pilot" / "Open Guest Concierge").
+ * The one Co-Pilot launcher: a round floating button at the bottom right (the header's top-right slot belongs to the
+ * account control). It clears the safe-area insets, and below 768px it sits above the bottom tab bar when that bar is
+ * shown (`aboveTabBar`). The planner pads the bottom of every page by --fab-space, so it never covers the last content.
+ * Icon only; the accessible name is "Open AI Co-Pilot" / "Open Guest Concierge". Focus shows the app's focus ring.
  */
-export function CopilotLauncher({ ref, open, onOpen, title, dialogId, guest }: LauncherProps) {
+export function CopilotLauncher({ ref, open, onOpen, title, dialogId, guest, aboveTabBar = false }: LauncherProps & { aboveTabBar?: boolean }) {
   return (
-    <button ref={ref} type="button" onClick={onOpen} data-testid="copilot-launcher"
+    <button ref={ref} type="button" onClick={onOpen} data-testid="copilot-launcher" data-floating="true"
       aria-haspopup="dialog" aria-expanded={open} aria-controls={dialogId} aria-label={`Open ${title}`} title={`Open ${title}`}
-      className={`flex h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-full px-3 text-sm font-semibold text-white shadow-sm sm:px-4 md:h-10 ${guest ? "bg-primary hover:bg-primary-hover" : "bg-maroon-800 hover:bg-maroon-900"}`}>
-      <span aria-hidden="true">{guest ? <Ticket size={18} /> : <Bot size={18} />}</span>
-      <span aria-hidden="true" className="hidden whitespace-nowrap sm:inline">{title}</span>
+      className={`fixed right-[calc(1rem+env(safe-area-inset-right))] z-30 grid h-14 w-14 place-items-center rounded-full text-white shadow-lg ring-2 ring-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-700 ${aboveTabBar ? "bottom-[calc(var(--tabbar-h)+env(safe-area-inset-bottom)+0.75rem)] md:bottom-[calc(1rem+env(safe-area-inset-bottom))]" : "bottom-[calc(1rem+env(safe-area-inset-bottom))]"} ${guest ? "bg-primary hover:bg-primary-hover" : "bg-maroon-800 hover:bg-maroon-900"}`}>
+      <span aria-hidden="true">{guest ? <Ticket size={24} /> : <Bot size={24} />}</span>
     </button>
   );
 }

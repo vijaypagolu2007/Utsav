@@ -338,7 +338,7 @@ describe("offline demo brain (flagship chips)", () => {
 
 test("Gemini declarations are generated from Zod and Gemini-safe", () => {
   const names = functionDeclarations.map(f => f.name);
-  assert.deepEqual(names, ["apply_plan_changes", "get_plan_snapshot", "initialize_event_plan", "get_plan_insights", "draft_outbound_message", "suggest_ideas", "revise_plan", "suggest_vendor_questions"]);
+  assert.deepEqual(names, ["apply_plan_changes", "get_plan_snapshot", "initialize_event_plan", "get_rsvp_counts", "get_plan_insights", "draft_outbound_message", "suggest_ideas", "revise_plan", "suggest_vendor_questions"]);
   const json = JSON.stringify(functionDeclarations);
   assert.ok(!json.includes('"$schema"'));
   assert.ok(!json.includes('"oneOf"'));
@@ -452,11 +452,11 @@ describe("guest mode permission boundary", () => {
       { op: "set_item_lock", budgetItemId: "b1", locked: true },
       { op: "upsert_vendor_quote", vendorName: "X", category: "decor", itemLabel: "Y", quotedPaise: 1 },
     ]) {
-      const r = applyBatch(royalWedding, { summary: "x", commands: [{ op: "set_rsvp", guestId: "g1", subEvent: "haldi", answer: "no" }, c] }, { role: "guest" });
+      const r = applyBatch(royalWedding, { summary: "x", commands: [{ op: "submit_rsvp_entry", entryId: "r-guest001", name: "G", partySize: 1, functions: ["haldi"], meal: "veg", answer: "not_coming" }, c] }, { role: "guest" });
       assert.equal(r.ok, false, c.op);
       if (!r.ok) { assert.equal(r.failedCommandIndex, 1); assert.match(r.reason, /Guest Concierge Mode is read-only for budgets and schedules/); assert.equal(r.suggestion, undefined); }
     }
-    const ok = applyBatch(royalWedding, { summary: "x", commands: [{ op: "set_rsvp", guestId: "g13", subEvent: "sangeet", answer: "yes" }] }, { role: "guest" });
+    const ok = applyBatch(royalWedding, { summary: "x", commands: [{ op: "submit_rsvp_entry", entryId: "r-guest001", name: "G", partySize: 2, functions: ["sangeet"], meal: "veg", answer: "coming" }] }, { role: "guest" });
     assert.ok(ok.ok);
     assert.ok(applyBatch(royalWedding, { summary: "x", commands: [{ op: "adjust_budget", category: "decor", deltaPaise: -100 }] }).ok); // organizer default
   });
@@ -471,23 +471,35 @@ describe("guest mode permission boundary", () => {
     assert.equal(executeAgentTool("initialize_event_plan", {}, royalWedding, TODAY, "guest").response.ok, false);
     assert.equal(executeAgentTool("get_plan_insights", {}, royalWedding, TODAY, "guest").response.ok, false);
   });
-  test("offline concierge: Sharma household RSVP with 2 Jain meals, as one guest-safe batch", () => {
-    const r = runOfflineGuestAgent(royalWedding, "Mark the Sharma household as attending Haldi and Reception with 2 Jain meals", TODAY, "g1");
+  test("v8 Part 1c (updated on purpose): the concierge changes the acting RSVP entry only, in one submit_rsvp_entry", () => {
+    const withMe = applyBatch(royalWedding, { summary: "t", commands: [{ op: "submit_rsvp_entry", entryId: "r-anil0001", name: "Anil Sharma", partySize: 3, functions: ["sangeet"], meal: "veg", answer: "maybe" }] }, { role: "guest" });
+    assert.ok(withMe.ok);
+    if (!withMe.ok) return;
+    const r = runOfflineGuestAgent(withMe.state, "I'm attending Haldi and Reception, with a Jain meal", TODAY, "r-anil0001");
     const b = r.actions.find(a => a.kind === "batch");
     assert.ok(b && b.kind === "batch");
     assert.equal(b.tier, 0);
-    const res = applyBatch(royalWedding, b.batch, { role: "guest" });
+    assert.deepEqual(b.batch.commands.map(c => c.op), ["submit_rsvp_entry"]);
+    const res = applyBatch(withMe.state, b.batch, { role: "guest", actorEntryId: "r-anil0001" });
     assert.ok(res.ok);
     if (!res.ok) return;
-    const sharma = res.state.guests.filter(g => g.householdId === "h3");
-    assert.ok(sharma.every(g => g.rsvp.s1 === "yes" && g.rsvp.s5 === "yes"));
-    assert.equal(sharma.filter(g => g.diet.includes("jain")).length, 2);
+    const anil = res.state.rsvpEntries.find(e => e.id === "r-anil0001")!;
+    assert.deepEqual([anil.answer, anil.meal, anil.partySize, [...anil.functions].sort()], ["coming", "jain", 3, ["s1", "s3", "s5"]]);
+    // Nobody else's RSVP can be touched from Guest View: another entry id is refused at the boundary.
+    const other = applyBatch(withMe.state, { summary: "t", commands: [{ op: "submit_rsvp_entry", entryId: "r-other001", name: "X", partySize: 1, functions: ["sangeet"], meal: "veg", answer: "coming" }] }, { role: "guest", actorEntryId: "r-anil0001" });
+    assert.ok(!other.ok && /your own RSVP/.test(other.reason));
+    // Without an RSVP yet, the concierge asks for the form instead of guessing a name.
+    const none = runOfflineGuestAgent(royalWedding, "RSVP yes for me to Haldi", TODAY, null);
+    assert.equal(none.actions.filter(a => a.kind === "batch").length, 0);
+    assert.match(none.reply, /RSVP form first/);
   });
   test("offline concierge answers schedule questions and refuses money talk via the boundary", () => {
     assert.match(runOfflineGuestAgent(royalWedding, "What time is the Sangeet and what's the dress code?", TODAY, "g1").reply, /7:00 PM.*Indo-western/);
     const cut = runOfflineGuestAgent(royalWedding, "Cut ₹20k from decor", TODAY, "g1");
     assert.ok(cut.actions.some(a => a.kind === "rejection"));
-    const claim = runOfflineGuestAgent(arcadeBirthday, "Claim the Retro Polaroid Camera from the birthday wishlist.", TODAY, "bg3");
+    const me = applyBatch(arcadeBirthday, { summary: "t", commands: [{ op: "submit_rsvp_entry", entryId: "r-farhan01", name: "Farhan", partySize: 1, functions: ["party"], meal: "veg", answer: "coming" }] }, { role: "guest" });
+    assert.ok(me.ok);
+    const claim = runOfflineGuestAgent(me.ok ? me.state : arcadeBirthday, "Claim the Retro Polaroid Camera from the birthday wishlist.", TODAY, "r-farhan01");
     assert.ok(claim.actions.some(a => a.kind === "batch"));
     const vol = runOfflineGuestAgent(culturalFest, "Sign Ravi Kumar up to volunteer for the Cultural Night", TODAY, null);
     const vb = vol.actions.find(a => a.kind === "batch");
@@ -733,12 +745,14 @@ describe("direct-edit ops: renames and planned amounts", () => {
     for (const c of DIRECT) {
       assert.ok(!GUEST_ALLOWED_OPS.has(c.op as never), c.op);
       for (const opts of [{ role: "guest" as const }, { role: "guest" as const, source: "ui" as const }]) {
-        const r = run([{ op: "set_rsvp", guestId: "g13", subEvent: "sangeet", answer: "yes" }, c], opts);
+        const r = run([{ op: "submit_rsvp_entry", entryId: "r-priya001", name: "Priya", partySize: 1, functions: ["sangeet"], meal: "veg", answer: "coming" }, c], opts);
         assert.equal(r.ok, false, c.op);
         if (!r.ok) { assert.equal(r.failedCommandIndex, 1); assert.match(r.reason, /Guest Concierge Mode is read-only/); }
       }
     }
-    assert.deepEqual([...GUEST_ALLOWED_OPS].sort(), ["claim_wishlist_item", "community_signup", "set_guest_diet", "set_rsvp"]);
+    // v8 Part 1c tightened the list on purpose: the open RSVP (submit_rsvp_entry), gift claims, sign-ups, and request_join
+    // (join endpoint only). set_rsvp, set_guest_diet and unclaim_wishlist_item are organizer-side now.
+    assert.deepEqual([...GUEST_ALLOWED_OPS].sort(), ["claim_wishlist_item", "community_signup", "request_join", "submit_rsvp_entry"]);
   });
 
   test("never from the AI: refused without source 'ui', absent from the Gemini declaration and the agent executor", () => {

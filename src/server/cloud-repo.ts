@@ -8,10 +8,14 @@
 // and every write is a compare-and-set: a `version` field plus a Firestore precondition (`currentDocument.exists=false`
 // to create, `currentDocument.updateTime` to update), with the rules enforcing version + 1 as a second guard.
 
-export type CloudDoc = { version: number; updatedAt: string; planJson: string; title: string; eventType: string };
+export type CloudDoc = { version: number; updatedAt: string; planJson: string; title: string; eventType: string;
+  /** v8 Part 0c: the tombstone. Set when the organizer deleted the event; a save with a plan clears it (Restore). */
+  deletedAt?: string };
 export type CloudSummary = { planKey: string; version: number; updatedAt: string; title: string; eventType: string };
 /** `expectedVersion` 0 means "create: only if absent". The new version is expected + 1. */
 export type CloudCasResult = { ok: true; version: number; updatedAt: string } | { ok: false; current: CloudDoc | null };
+/** "Delete forever": only if the stored version is still `expectedVersion`. */
+export type CloudRemoveResult = { ok: true } | { ok: false; current: CloudDoc | null };
 /** Who is asking: the uid from the verified token, and that same token (the REST backend forwards it to Firestore). */
 export type Caller = { uid: string; idToken: string };
 
@@ -19,6 +23,8 @@ export interface CloudRepo {
   list(caller: Caller): Promise<CloudSummary[]>;
   get(caller: Caller, planKey: string): Promise<CloudDoc | null>;
   cas(caller: Caller, planKey: string, expectedVersion: number, data: Omit<CloudDoc, "version">): Promise<CloudCasResult>;
+  /** v8 Part 0c: a real delete, compare-and-set on the version like every write. */
+  remove(caller: Caller, planKey: string, expectedVersion: number): Promise<CloudRemoveResult>;
 }
 
 /**
@@ -50,11 +56,17 @@ export class MemoryCloudRepo implements CloudRepo {
     this.docs.set(this.k(uid, planKey), next);
     return { ok: true, version: next.version, updatedAt: next.updatedAt };
   }
+  async remove({ uid }: Caller, planKey: string, expectedVersion: number): Promise<CloudRemoveResult> {
+    const cur = this.docs.get(this.k(uid, planKey)) ?? null;
+    if (!cur || cur.version !== expectedVersion) return { ok: false, current: cur };
+    this.docs.delete(this.k(uid, planKey));
+    return { ok: true };
+  }
 }
 
 // ---------- Firestore REST v1 (production) ----------
 /** The fields each plan document holds. firestore.rules allows exactly these keys (keys().hasOnly). */
-export const CLOUD_DOC_FIELDS = ["plan", "version", "updatedAt", "title", "eventType", "schema"] as const;
+export const CLOUD_DOC_FIELDS = ["plan", "version", "updatedAt", "title", "eventType", "schema", "deletedAt"] as const;
 
 type FsValue = { stringValue?: string; integerValue?: string | number; timestampValue?: string; [k: string]: unknown };
 type FsDoc = { name?: string; fields?: Record<string, FsValue>; updateTime?: string };
@@ -75,7 +87,10 @@ export function fromFirestore(doc: FsDoc | null | undefined): CloudDoc | null {
   if (!f || typeof f !== "object") return null;
   const version = int(f.version);
   if (version === null || version < 1 || typeof f.plan?.stringValue !== "string") return null;
-  return { version, updatedAt: time(f.updatedAt), planJson: f.plan.stringValue, title: str(f.title), eventType: str(f.eventType) };
+  const out: CloudDoc = { version, updatedAt: time(f.updatedAt), planJson: f.plan.stringValue, title: str(f.title), eventType: str(f.eventType) };
+  const deletedAt = f.deletedAt ? time(f.deletedAt) : "";
+  if (deletedAt) out.deletedAt = deletedAt;
+  return out;
 }
 
 export function toFirestoreFields(d: CloudDoc): Record<string, FsValue> {
@@ -86,6 +101,7 @@ export function toFirestoreFields(d: CloudDoc): Record<string, FsValue> {
     title: { stringValue: d.title },
     eventType: { stringValue: d.eventType },
     schema: { integerValue: "1" },
+    ...(d.deletedAt ? { deletedAt: { timestampValue: d.deletedAt } } : {}),
   };
 }
 
@@ -180,6 +196,17 @@ export class FirestoreRestRepo implements CloudRepo {
       const c = await conflict();
       if (!c.ok && (c.current?.version ?? 0) !== expectedVersion) return c;
     }
+    this.fail(r);
+  }
+
+  async remove({ uid, idToken }: Caller, planKey: string, expectedVersion: number): Promise<CloudRemoveResult> {
+    const cur = await this.getRaw(uid, idToken, planKey);
+    if (!cur || cur.doc?.version !== expectedVersion || !cur.updateTime) return { ok: false, current: cur?.doc ?? null };
+    const q = new URLSearchParams({ "currentDocument.updateTime": cur.updateTime });
+    const r = await this.send(`${this.docUrl(uid, planKey)}?${q}`, idToken, { method: "DELETE" });
+    if (r.http === 200) return { ok: true };
+    if (r.http === 409 || r.http === 412 || r.status === "FAILED_PRECONDITION" || r.status === "ABORTED" || r.http === 404 || r.status === "NOT_FOUND")
+      return { ok: false, current: (await this.getRaw(uid, idToken, planKey))?.doc ?? null };
     this.fail(r);
   }
 }

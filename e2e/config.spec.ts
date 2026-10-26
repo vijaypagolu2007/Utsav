@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { skipWelcome } from "./helpers";
+import { skipWelcome, switchEvent } from "./helpers";
 
 // Configuration-driven templates, prompts and layouts, end to end.
 const pageErrors: string[] = [];
@@ -22,10 +22,14 @@ test("GET /api/event-templates returns the public template summaries", async ({ 
   for (const leak of ["guests", "vendors", "phone", "inviteCode", "seed"]) expect(raw).not.toContain(`"${leak}"`);
 });
 
-test("the event switcher lists the registry and each template renders its configured sections", async ({ page }) => {
+test("the event menu lists the registry under Samples and each template renders its configured sections", async ({ page }) => {
   await page.goto("/");
-  const select = page.getByRole("combobox", { name: "Event" });
-  await expect(select.locator("option")).toHaveText(["1. Royal Wedding — ₹25L", "2. 30th Arcade Birthday — ₹1.5L", "3. Community Cultural Fest — ₹5L"]);
+  // v8 Part 0b: the header title is the event menu; samples are listed by name with type and budget, unnumbered.
+  const menuBtn = page.getByTestId("event-switcher");
+  await menuBtn.click();
+  const samples = page.getByRole("group", { name: "Samples" }).getByRole("menuitemradio");
+  await expect(samples).toHaveText([/^Royal Wedding\s*Wedding · ₹25L$/, /^30th Arcade Birthday\s*Birthday · ₹1\.5L$/, /^Community Cultural Fest\s*Community event · ₹5L$/]);
+  await page.keyboard.press("Escape");
   const want: Record<string, string[]> = {
     wedding: ["Wedding · RSVP Matrix & Traditions", "Dietary counts · Muhurtham (yes)"],
     birthday: ["Birthday · Rohan turns 30 · Retro arcade · 80s neon", "Gift wishlist", "Party activity run-sheet"],
@@ -34,7 +38,7 @@ test("the event switcher lists the registry and each template renders its config
   // The event-type card is on the Event page (the switcher stays in the header on every page).
   await page.getByRole("navigation", { name: "Pages" }).getByRole("link", { name: "Event", exact: true }).click();
   for (const [id, texts] of Object.entries(want)) {
-    await select.selectOption(id);
+    await switchEvent(page, id);
     for (const t of texts) await expect(page.getByText(t).first()).toBeVisible();
   }
 });
@@ -52,7 +56,7 @@ test("prompt chips come from configuration and still need approval", async ({ pa
 
 test("guest view uses the template's guest sections", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("combobox", { name: "Event" }).selectOption("community");
+  await switchEvent(page, "community");
   await page.getByRole("button", { name: "Guest View" }).click();
   await expect(page.getByText("Join the community")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Get involved" })).toBeVisible();

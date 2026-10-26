@@ -10,7 +10,7 @@ import { handleScan, scanInputFromJson, sniff, SCAN_MAX_FILE_BYTES } from "../se
 import type { GenerateFn, GenerateResult } from "../server/gemini-client";
 import { rupeesToPaise, QuoteValidationError } from "../quote-scanner";
 import { FileStore, MemoryStore, setStoreForTests, UpstashStore } from "../server/store";
-import { createSharedEvent, getGuestView, getOrganizerEvent, postGuestActions, putOrganizerEvent } from "../server/events";
+import { createSharedEvent, getGuestView, getOrganizerEvent, postGuestActions, postRsvp, putOrganizerEvent } from "../server/events";
 import { rebaseGuestFields } from "../sync";
 import { geminiApiKey, readBodyLimited } from "../server/http";
 import { AgentState } from "../schema";
@@ -134,7 +134,7 @@ describe("chat API", () => {
       { functionCalls: [{ id: "1", name: "initialize_event_plan", args: {} }, { id: "2", name: "apply_plan_changes", args: { summary: "x", commands: [{ op: "adjust_budget", category: "decor", deltaPaise: -100 }] } }] },
       { text: "That's for the organiser." },
     );
-    const r = await handleChat({ messages: user("cut decor"), state: royalWedding, today: TODAY, role: "guest", actingGuestId: "g1" }, { apiKey: KEY, generate: gen });
+    const r = await handleChat({ messages: user("cut decor"), state: royalWedding, today: TODAY, role: "guest" }, { apiKey: KEY, generate: gen });
     const b = body<ChatResponseBody>(r);
     assert.equal(b.actions.filter(a => a.kind === "batch" || a.kind === "init").length, 0);
     assert.ok(b.actions.some(a => a.kind === "rejection"));
@@ -252,8 +252,11 @@ const IP = "203.0.113.7";
 async function publish(plan: AgentState = royalWedding) {
   const r = await createSharedEvent({ plan }, IP);
   assert.equal(r.status, 201);
-  return body<{ eventId: string; organizerToken: string; version: number; invites: { householdId: string; label: string; token: string }[] }>(r);
+  return body<{ eventId: string; organizerToken: string; version: number; invites: { householdId: string; label: string; token: string }[]; rsvpToken: string }>(r);
 }
+/** v8 Part 1c: a guest browser's device token (a v4 UUID); n picks a different device. */
+const dev = (n = 1) => `8f14e45f-ceea-4e7a-9d1b-${String(n).padStart(12, "0")}`;
+const rsvpBody = (over: Record<string, unknown> = {}) => ({ name: "Asha Rao", partySize: 4, functions: ["s4"], meal: "veg", answer: "coming", ...over });
 
 describe("shared guest links", () => {
   beforeEach(() => { store = new MemoryStore(); setStoreForTests(store); });
@@ -273,26 +276,32 @@ describe("shared guest links", () => {
     assert.equal(r.status, 200);
     const s = JSON.stringify(r.body);
     for (const leak of ["Paise", "budget", "vendor", "Sri Annapurna", "committed", "payments", "tasks", "phone", "inviteCode", "organizerToken", "Petals"]) assert.ok(!s.includes(leak), `leaked ${leak}`);
-    const v = body<{ subEvents: unknown[]; household: unknown }>(r);
+    const v = body<{ subEvents: unknown[]; mine: unknown; rsvp: unknown }>(r);
     assert.equal(v.subEvents.length, royalWedding.subEvents.filter(x => x.visibility === "public").length);
-    assert.equal(v.household, null);
+    assert.deepEqual([v.mine, v.rsvp], [null, null], "no RSVP form on the public link");
   });
-  test("invite token reveals only that household", async () => {
+  test("v8 Part 1c: the RSVP link and old household links open the form and show no guests at all; a device sees only its own RSVP", async () => {
     const p = await publish();
     const inv = p.invites[0]!;
-    const v = body<{ household: { members: { id: string }[] } }>(await getGuestView(p.eventId, inv.token, IP));
-    const expected = royalWedding.guests.filter(g => g.householdId === inv.householdId).map(g => g.id).sort();
-    assert.deepEqual(v.household.members.map(m => m.id).sort(), expected);
+    for (const t of [inv.token, p.rsvpToken]) {
+      const v = body<{ mode: string; mine: unknown; rsvp: { functions: unknown[] } }>(await getGuestView(p.eventId, t, IP, dev(9)));
+      assert.deepEqual([v.mode, v.mine], ["open", null]);
+      assert.ok(v.rsvp.functions.length > 0);
+      for (const g of royalWedding.guests) assert.ok(!JSON.stringify(v).includes(g.name), g.name);
+    }
+    await postRsvp(p.eventId, p.rsvpToken, dev(1), rsvpBody({ phone: "98480 12345" }), IP);
+    await postRsvp(p.eventId, p.rsvpToken, dev(2), rsvpBody({ name: "Other Family", phone: "98480 99999" }), "198.51.100.3");
+    const me = body<{ mine: { name: string; hasPhone: boolean } }>(await getGuestView(p.eventId, p.rsvpToken, IP, dev(1)));
+    assert.deepEqual([me.mine.name, me.mine.hasPhone], ["Asha Rao", true]);
+    const raw = JSON.stringify(me);
+    for (const leak of ["Other Family", "9848012345", "98480 12345", "8099999", "phone\":"]) assert.ok(!raw.includes(leak), leak);
   });
   test("guest RSVP persists and is visible to the organizer", async () => {
     const p = await publish();
-    const g = royalWedding.guests.find(x => Object.keys(x.rsvp).length)!;
-    const inv = p.invites.find(i => i.householdId === g.householdId)!;
-    const sub = royalWedding.subEvents.find(s => s.id === Object.keys(g.rsvp)[0])!;
-    const w = await postGuestActions(p.eventId, inv.token, { commands: [{ op: "set_rsvp", guestId: g.id, subEvent: sub.slug, answer: "yes" }] }, IP);
+    const w = await postRsvp(p.eventId, p.rsvpToken, dev(1), rsvpBody(), IP);
     assert.equal(w.status, 200, JSON.stringify(w.body));
     const o = body<{ plan: AgentState; version: number }>(await getOrganizerEvent(p.eventId, p.organizerToken));
-    assert.equal(o.plan.guests.find(x => x.id === g.id)!.rsvp[sub.id], "yes");
+    assert.deepEqual(o.plan.rsvpEntries.map(e => [e.name, e.partySize, e.functions, e.answer]), [["Asha Rao", 4, ["s4"], "coming"]]);
     assert.equal(o.version, 2);
   });
   test("guests cannot run organizer commands or mass-assign fields", async () => {
@@ -302,7 +311,8 @@ describe("shared guest links", () => {
       { op: "adjust_budget", category: "decor", deltaPaise: -100 },
       { op: "move_sub_event", subEvent: "haldi", to: { weekday: "friday" } },
       { op: "record_payment", budgetItemId: "b6", paymentId: "x", paidDate: TODAY },
-      { op: "set_rsvp", guestId: "g1", subEvent: "haldi", answer: "yes", plannedPaise: 1 },
+      { op: "set_rsvp", guestId: "g1", subEvent: "haldi", answer: "yes" },
+      { op: "submit_rsvp_entry", entryId: "r-abcdef12", name: "X", partySize: 1, functions: ["haldi"], meal: "veg", answer: "coming" },
       // The organizer's inline-edit ops are not on the guest allowlist either.
       { op: "rename_event", title: "Hijacked" },
       { op: "set_partner_names", partners: ["A", "B"] },
@@ -317,36 +327,32 @@ describe("shared guest links", () => {
     assert.equal(after.budgetItems.find(b => b.id === "b1")!.plannedPaise, 8_000_000);
     assert.equal((await postGuestActions(p.eventId, inv.token, { commands: [], plan: royalWedding }, IP)).status, 400);
   });
-  test("guests cannot impersonate another household or act without an invite", async () => {
+  test("v8 Part 1c: a device edits only its own RSVP; another device never overwrites it; no link, no write", async () => {
     const p = await publish();
-    const mine = p.invites[0]!;
-    const other = royalWedding.guests.find(g => g.householdId !== mine.householdId)!;
-    const sub = Object.keys(other.rsvp)[0] ?? royalWedding.subEvents[0]!.id;
-    const slug = royalWedding.subEvents.find(s => s.id === sub)!.slug;
-    assert.equal((await postGuestActions(p.eventId, mine.token, { commands: [{ op: "set_rsvp", guestId: other.id, subEvent: slug, answer: "no" }] }, IP)).status, 403);
-    assert.equal((await postGuestActions(p.eventId, null, { commands: [{ op: "set_rsvp", guestId: other.id, subEvent: slug, answer: "no" }] }, IP)).status, 401);
-    assert.equal((await postGuestActions(p.eventId, "A".repeat(43), { commands: [{ op: "set_rsvp", guestId: other.id, subEvent: slug, answer: "no" }] }, IP)).status, 403);
+    const a = body<{ view: { mine: { entryId: string } } }>(await postRsvp(p.eventId, p.rsvpToken, dev(1), rsvpBody(), IP)).view.mine.entryId;
+    const b = body<{ view: { mine: { entryId: string } } }>(await postRsvp(p.eventId, p.rsvpToken, dev(2), rsvpBody({ name: "Somebody Else", partySize: 1 }), IP)).view.mine.entryId;
+    assert.notEqual(a, b);
+    const o = body<{ plan: AgentState }>(await getOrganizerEvent(p.eventId, p.organizerToken)).plan;
+    assert.equal(o.rsvpEntries.find(e => e.id === a)!.name, "Asha Rao", "device 2 didn't touch device 1's entry");
+    // The body can't name an entry: the server picks it from the device token.
+    assert.equal((await postRsvp(p.eventId, p.rsvpToken, dev(2), { ...rsvpBody(), entryId: a }, IP)).status, 400);
+    assert.equal((await postRsvp(p.eventId, null, dev(3), rsvpBody(), IP)).status, 401);
+    assert.equal((await postRsvp(p.eventId, "A".repeat(43), dev(3), rsvpBody(), IP)).status, 403);
+    assert.equal((await postRsvp(p.eventId, p.rsvpToken, "not-a-uuid", rsvpBody(), IP)).status, 400);
+    assert.equal((await postRsvp(p.eventId, p.rsvpToken, null, rsvpBody(), IP)).status, 400);
   });
-  test("an invite for one event can't touch another event", async () => {
+  test("an RSVP link for one event can't touch another event", async () => {
     const a = await publish(), b = await publish();
-    const g = royalWedding.guests.find(x => x.householdId === a.invites[0]!.householdId)!;
-    const slug = royalWedding.subEvents.find(s => s.id === Object.keys(g.rsvp)[0])!.slug;
-    assert.equal((await postGuestActions(b.eventId, a.invites[0]!.token, { commands: [{ op: "set_rsvp", guestId: g.id, subEvent: slug, answer: "yes" }] }, IP)).status, 403);
+    assert.equal((await postRsvp(b.eventId, a.rsvpToken, dev(1), rsvpBody(), IP)).status, 403);
+    assert.equal((await postGuestActions(b.eventId, a.invites[0]!.token, { commands: [{ op: "claim_wishlist_item", itemId: "w1", guestId: null }] }, IP)).status, 403);
     assert.equal((await getOrganizerEvent(b.eventId, a.organizerToken)).status, 401);
   });
-  test("self-invite is rejected whether the sub-event is public or private", async () => {
-    const g = royalWedding.guests.find(x => royalWedding.subEvents.some(s => !(s.id in x.rsvp) && !royalWedding.guests.some(o => o.householdId === x.householdId && s.id in o.rsvp)))!;
-    const notInvited = royalWedding.subEvents.find(s => !royalWedding.guests.some(o => o.householdId === g.householdId && s.id in o.rsvp))!;
-    for (const visibility of ["public", "private"] as const) {
-      const plan = { ...royalWedding, subEvents: royalWedding.subEvents.map(s => s.id === notInvited.id ? { ...s, visibility } : s) };
-      const p = await publish(plan);
-      const inv = p.invites.find(i => i.householdId === g.householdId)!;
-      const r = await postGuestActions(p.eventId, inv.token, { commands: [{ op: "set_rsvp", guestId: g.id, subEvent: notInvited.slug, answer: "yes" }] }, IP);
-      // Public: visible but still not invited → the reducer refuses (visibility never grants RSVP).
-      // Private: not even visible → the same answer as a nonexistent sub-event, with no name in the error.
-      assert.equal(r.status, visibility === "public" ? 422 : 400, visibility);
-      if (visibility === "private") assert.ok(!JSON.stringify(r.body).includes(notInvited.name), "private name leaked in error");
-    }
+  test("functions must be ones that take RSVPs; unknown ids are refused without echoing them", async () => {
+    const plan = { ...royalWedding, subEvents: royalWedding.subEvents.map(s => s.id === "s1" ? { ...s, collectsRsvp: false } : s) };
+    const p = await publish(plan);
+    assert.equal((await postRsvp(p.eventId, p.rsvpToken, dev(1), rsvpBody({ functions: ["s1"] }), IP)).status, 422);
+    const r = await postRsvp(p.eventId, p.rsvpToken, dev(1), rsvpBody({ functions: ["secret-sub"] }), IP);
+    assert.equal(r.status, 422);
   });
   test("duplicate wishlist claims are rejected", async () => {
     const p = await publish(arcadeBirthday);
@@ -354,12 +360,12 @@ describe("shared guest links", () => {
     assert.equal(ext.type, "birthday");
     if (ext.type !== "birthday") return;
     const open = ext.wishlist.find(w => !w.claimedByGuestId)!;
-    const [h1, h2] = p.invites;
-    const g1 = arcadeBirthday.guests.find(g => g.householdId === h1!.householdId)!;
-    const g2 = arcadeBirthday.guests.find(g => g.householdId === h2!.householdId)!;
-    assert.equal((await postGuestActions(p.eventId, h1!.token, { commands: [{ op: "claim_wishlist_item", itemId: open.id, guestId: g1.id }] }, IP)).status, 200);
-    assert.equal((await postGuestActions(p.eventId, h2!.token, { commands: [{ op: "claim_wishlist_item", itemId: open.id, guestId: g2.id }] }, IP)).status, 422);
-    assert.equal((await postGuestActions(p.eventId, h1!.token, { commands: [{ op: "claim_wishlist_item", itemId: open.id, guestId: null }] }, IP)).status, 403);
+    const fns = ["bs2"];
+    const e1 = body<{ view: { mine: { entryId: string } } }>(await postRsvp(p.eventId, p.rsvpToken, dev(1), rsvpBody({ functions: fns }), IP)).view.mine.entryId;
+    const e2 = body<{ view: { mine: { entryId: string } } }>(await postRsvp(p.eventId, p.rsvpToken, dev(2), rsvpBody({ name: "B", functions: fns }), IP)).view.mine.entryId;
+    assert.equal((await postGuestActions(p.eventId, p.rsvpToken, { commands: [{ op: "claim_wishlist_item", itemId: open.id, guestId: e1 }] }, IP, dev(1))).status, 200);
+    assert.equal((await postGuestActions(p.eventId, p.rsvpToken, { commands: [{ op: "claim_wishlist_item", itemId: open.id, guestId: e2 }] }, IP, dev(2))).status, 422);
+    assert.equal((await postGuestActions(p.eventId, p.rsvpToken, { commands: [{ op: "claim_wishlist_item", itemId: open.id, guestId: null }] }, IP, dev(2))).status, 422, "not yours to release");
   });
   test("community sign-up works on the public link without an invite", async () => {
     const p = await publish(culturalFest);
@@ -380,12 +386,9 @@ describe("shared guest links", () => {
   });
   test("concurrent updates: a stale organizer save gets 409 and the rebase keeps the guest's RSVP", async () => {
     const p = await publish();
-    const g = royalWedding.guests.find(x => Object.keys(x.rsvp).length)!;
-    const subId = Object.keys(g.rsvp)[0]!;
-    const inv = p.invites.find(i => i.householdId === g.householdId)!;
     // Organizer edits locally (a budget lock) while a guest RSVPs on the server.
     const local: AgentState = { ...royalWedding, budgetItems: royalWedding.budgetItems.map(b => (b.id === "b1" ? { ...b, locked: true } : b)) };
-    assert.equal((await postGuestActions(p.eventId, inv.token, { commands: [{ op: "set_rsvp", guestId: g.id, subEvent: royalWedding.subEvents.find(s => s.id === subId)!.slug, answer: "no" }] }, IP)).status, 200);
+    assert.equal((await postRsvp(p.eventId, p.rsvpToken, dev(1), rsvpBody(), IP)).status, 200);
     const stale = await putOrganizerEvent(p.eventId, p.organizerToken, { plan: local, baseVersion: 1 });
     assert.equal(stale.status, 409);
     const cur = body<{ current: { version: number; plan: AgentState } }>(stale).current;
@@ -393,7 +396,7 @@ describe("shared guest links", () => {
     const okPut = await putOrganizerEvent(p.eventId, p.organizerToken, { plan: merged, baseVersion: cur.version });
     assert.equal(okPut.status, 200);
     const final = body<{ plan: AgentState }>(await getOrganizerEvent(p.eventId, p.organizerToken)).plan;
-    assert.equal(final.guests.find(x => x.id === g.id)!.rsvp[subId], "no", "guest change kept");
+    assert.deepEqual(final.rsvpEntries.map(e => e.name), ["Asha Rao"], "guest change kept");
     assert.equal(final.budgetItems.find(b => b.id === "b1")!.locked, true, "organizer change kept");
   });
   test("parallel guest writes all land (server-side retry on version conflict)", async () => {
@@ -542,23 +545,18 @@ describe("sub-event visibility", () => {
     }
     assert.ok(v.moments.every(m => pub.some(x => x.id === m.subEventId)), "moment from a private sub-event leaked");
   });
-  test("a household sees private sub-events it is invited to, and not the ones it isn't", async () => {
+  test("v8 Part 1c: the RSVP link (and an old household link) shows every sub-event that takes RSVPs; the public link only public ones", async () => {
     const p = await publish();
-    for (const inv of p.invites) {
-      const members = royalWedding.guests.filter(g => g.householdId === inv.householdId);
-      const invited = new Set(members.flatMap(g => Object.keys(g.rsvp)));
-      const v = body<{ subEvents: { id: string }[] }>(await getGuestView(p.eventId, inv.token, IP));
-      const ids = new Set(v.subEvents.map(x => x.id));
-      for (const s of priv) assert.equal(ids.has(s.id), invited.has(s.id), `${inv.householdId} / ${s.id}`);
-      for (const s of pub) assert.ok(ids.has(s.id));
+    const takes = new Set([...pub, ...royalWedding.subEvents.filter(s => s.collectsRsvp)].map(s => s.id));
+    for (const t of [p.rsvpToken, p.invites[0]!.token]) {
+      const v = body<{ subEvents: { id: string }[]; rsvp: { functions: { id: string }[] } }>(await getGuestView(p.eventId, t, IP));
+      assert.deepEqual(new Set(v.subEvents.map(x => x.id)), takes);
+      assert.deepEqual(v.rsvp.functions.map(f => f.id), royalWedding.subEvents.filter(s => s.collectsRsvp).sort((a, b) => a.date.localeCompare(b.date)).map(s => s.id));
     }
   });
-  test("an invited household can still RSVP to a private sub-event", async () => {
+  test("a guest can RSVP to a private sub-event from the RSVP link (it is the invitation)", async () => {
     const p = await publish();
-    const g = royalWedding.guests.find(x => priv.some(s => s.id in x.rsvp))!;
-    const s = priv.find(x => x.id in g.rsvp)!;
-    const inv = p.invites.find(i => i.householdId === g.householdId)!;
-    const r = await postGuestActions(p.eventId, inv.token, { commands: [{ op: "set_rsvp", guestId: g.id, subEvent: s.slug, answer: "maybe" }] }, IP);
+    const r = await postRsvp(p.eventId, p.rsvpToken, dev(1), rsvpBody({ functions: [priv[0]!.id] }), IP);
     assert.equal(r.status, 200);
   });
   test("guests cannot change visibility, with or without a token", async () => {

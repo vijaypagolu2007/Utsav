@@ -10,7 +10,11 @@ import { rebaseGuestFields } from "@/sync";
 
 export const SHARE_KEY = "utsav_share_v1";
 export type Invite = { householdId: string; label: string; token: string };
-export type ShareInfo = { eventId: string; organizerToken: string; version: number; invites: Invite[] };
+/**
+ * joinToken (v8 Part 1): the group join link's token while it is switched on, null when off (absent on older records).
+ * v8 Part 1c: rsvpToken is the event's one open RSVP link (absent on share info saved before it until the next sync).
+ */
+export type ShareInfo = { eventId: string; organizerToken: string; version: number; invites: Invite[]; joinToken?: string | null; rsvpToken?: string | null };
 export type ShareStatus = { state: "idle" | "publishing" | "syncing" | "synced" | "error" | "unconfigured"; message?: string; at?: number };
 
 function loadShares(): Partial<Record<TemplateId, ShareInfo>> {
@@ -41,6 +45,12 @@ async function api(path: string, init: RequestInit & { token?: string } = {}) {
   return { status: res.status, body };
 }
 
+/** PATCH /api/events/:id { removed }: switch a shared event's guest links off (deleted) or on (restored). */
+export async function setRemoved(s: Pick<ShareInfo, "eventId" | "organizerToken">, removed: boolean): Promise<boolean> {
+  try { return (await api(`/api/events/${encodeURIComponent(s.eventId)}`, { method: "PATCH", token: s.organizerToken, body: JSON.stringify({ removed }) })).status === 200; }
+  catch { return false; }
+}
+
 type SyncDeps = {
   getPlan: () => AgentState;
   onMerge: (merged: AgentState) => void;
@@ -69,15 +79,19 @@ async function reconcile(t: TemplateId, info: ShareInfo, d: SyncDeps): Promise<v
       const merged = rebaseGuestFields(local, remote, base && base.event.id === remote.event.id ? base : null);
       if (!same(merged, local)) d.onMerge(merged);
       let invites = got.body.invites as Invite[];
+      let rsvpToken = (got.body.rsvpToken as string | null | undefined) ?? null;
+      const joinToken = (got.body.joinToken as string | null | undefined) ?? null;
       let v = version;
       if (!same(merged, remote)) {
         const put = await api(`/api/events/${info.eventId}`, { method: "PUT", token: info.organizerToken, body: JSON.stringify({ plan: merged, baseVersion: version }) });
         if (put.status === 409) continue; // a guest wrote meanwhile: pull again and re-merge
         if (put.status !== 200) { d.setStatus({ state: "error", message: String(put.body.message ?? `Sync failed (${put.status})`) }); return; }
         v = Number(put.body.version); invites = put.body.invites as Invite[];
+        rsvpToken = (put.body.rsvpToken as string | null | undefined) ?? rsvpToken;
       }
       saveBase(t, merged);
-      if (v !== info.version || !same(invites, info.invites)) d.update(t, { ...info, version: v, invites });
+      if (v !== info.version || !same(invites, info.invites) || joinToken !== (info.joinToken ?? null) || rsvpToken !== (info.rsvpToken ?? null))
+        d.update(t, { ...info, version: v, invites, joinToken, rsvpToken });
       d.setStatus({ state: "synced", at: Date.now() });
       return;
     }
@@ -115,7 +129,8 @@ export function useSharedEvent(type: TemplateId, plan: AgentState, onMerge: (mer
       if (r.status === 503) { setStatus({ state: "unconfigured", message: String(r.body.message ?? "Shared storage is not configured") }); return; }
       if (r.status !== 201) { setStatus({ state: "error", message: String(r.body.message ?? `Couldn't publish (${r.status})`) }); return; }
       saveBase(type, planRef.current);
-      update(type, { eventId: String(r.body.eventId), organizerToken: String(r.body.organizerToken), version: Number(r.body.version), invites: r.body.invites as Invite[] });
+      update(type, { eventId: String(r.body.eventId), organizerToken: String(r.body.organizerToken), version: Number(r.body.version), invites: r.body.invites as Invite[],
+        rsvpToken: (r.body.rsvpToken as string | null | undefined) ?? null });
       setStatus({ state: "synced", at: Date.now() });
     } catch {
       setStatus({ state: "error", message: "Server unreachable." });
@@ -146,5 +161,43 @@ export function useSharedEvent(type: TemplateId, plan: AgentState, onMerge: (mer
     return () => { clearInterval(iv); window.removeEventListener("focus", onFocus); };
   }, [sharedId, syncNow]);
 
-  return { share, status, publish, forget, syncNow };
+  /**
+   * v8 Part 0c. Deleting an event parks its guest link (with the organizer token) in the trash and switches the link off
+   * on the server (410 for guests); Restore puts it back and switches it on again. Best effort: offline, the link keeps
+   * working until the organizer is back online and deletes or restores again.
+   */
+  const detach = useCallback((t: TemplateId): ShareInfo | null => {
+    const s = loadShares()[t] ?? null;
+    if (s) { update(t, null); saveBase(t, null); void setRemoved(s, true); }
+    return s;
+  }, [update]);
+  const attach = useCallback((t: TemplateId, s: ShareInfo) => {
+    update(t, s);
+    void setRemoved(s, false);
+  }, [update]);
+
+  /**
+   * v8 Part 1. Organizer actions on the server copy that are not plan data: a new private link for one household (the
+   * old one stops working), and the group join link (enable, rotate to a new token, disable). Both return an error
+   * message, or null when it worked, and update the stored share info.
+   */
+  const serverAction = useCallback(async (path: string, body: unknown): Promise<string | null> => {
+    const s = loadShares()[type];
+    if (!s) return "Publish guest links first";
+    try {
+      const r = await api(`/api/events/${encodeURIComponent(s.eventId)}/${path}`, { method: "POST", token: s.organizerToken, body: JSON.stringify(body) });
+      if (r.status !== 200) return String(r.body.message ?? `The server answered ${r.status}`);
+      update(type, { ...s, version: Number(r.body.version), invites: r.body.invites as Invite[], joinToken: (r.body.joinToken as string | null) ?? null,
+        rsvpToken: (r.body.rsvpToken as string | null | undefined) ?? s.rsvpToken ?? null });
+      return null;
+    } catch {
+      return "Server unreachable: try again when you're online.";
+    }
+  }, [type, update]);
+  const resetInvite = useCallback((householdId: string) => serverAction("invites", { householdId }), [serverAction]);
+  const setJoinLink = useCallback((action: "enable" | "rotate" | "disable") => serverAction("join-link", { action }), [serverAction]);
+  /** v8 Part 1c: a new RSVP link for the event (also makes the first one for an event shared before it). */
+  const resetRsvpLink = useCallback(() => serverAction("invites", { rsvpLink: true }), [serverAction]);
+
+  return { share, status, publish, forget, syncNow, detach, attach, resetInvite, setJoinLink, resetRsvpLink };
 }

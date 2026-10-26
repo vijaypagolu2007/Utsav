@@ -150,11 +150,11 @@ export default function TimelineCard({ plan, commit, highlight }: { plan: AgentS
                     </div>
                   </div>
                   <button type="button" data-testid={`visibility-${s.slug}`} aria-pressed={pub}
-                    title={pub ? "Shown on the public guest link. Click to hide it (invited households still see it)." : "Only invited households see this on guest links. Click to show it publicly."}
-                    onClick={() => commit({ summary: `${pub ? "Hide" : "Show"} ${s.name} ${pub ? "from" : "on"} the public guest link`,
+                    title={pub ? "Shown on the read-only itinerary page (the guest link without an RSVP code). Click to hide it there. Guests on the RSVP link still see it if it takes RSVPs." : "Hidden from the read-only itinerary page. Guests on the RSVP link still see it if it takes RSVPs. Click to show it there."}
+                    onClick={() => commit({ summary: `${pub ? "Hide" : "Show"} ${s.name} ${pub ? "from" : "on"} the read-only itinerary page`,
                       commands: [{ op: "set_sub_event_visibility", subEvent: s.slug, visibility: pub ? "private" : "public" }] })}
                     className={`flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg px-3 text-sm font-medium ring-1 ring-inset max-md:min-h-11 pointer-coarse:min-h-11 ${pub ? "bg-emerald-50 text-emerald-800 ring-emerald-600" : "bg-surface text-sand-700 ring-sand-500"}`}>
-                    <span className="sr-only">{s.name} on the public guest link: </span>
+                    <span className="sr-only">{s.name} on the read-only itinerary page: </span>
                     {pub ? <><Eye size={15} aria-hidden="true" /> Public</> : <><EyeOff size={15} aria-hidden="true" /> Private</>}
                   </button>
                 </div>

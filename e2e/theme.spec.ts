@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { skipWelcome } from "./helpers";
+import { submitRsvp, skipWelcome, switchEvent } from "./helpers";
 
 // Dark mode: Light / Dark / System (default), persisted in localStorage["utsav_theme_v1"] apart from the plan,
 // applied before first paint, axe-clean in dark for the organizer, the Guest View and the public guest page; print stays light.
@@ -74,7 +74,7 @@ test("dark mode: organizer dashboard, More menu, share dialog and Co-Pilot drawe
   expect(await theme(page)).toBe("dark");
   const canvas = await bg(page);
   for (const t of ["birthday", "community", "wedding"]) {
-    await page.getByRole("combobox", { name: "Event" }).selectOption(t);
+    await switchEvent(page, t);
     expect(await axe(page), `organizer ${t} (dark)`).toEqual([]);
   }
   await page.getByRole("button", { name: "More", exact: true }).click();
@@ -89,8 +89,11 @@ test("dark mode: organizer dashboard, More menu, share dialog and Co-Pilot drawe
   await page.keyboard.press("Escape");
   await page.getByTestId("open-guest-links").click();
   await page.getByTestId("publish-guest-links").click();
-  await expect(page.getByTestId("public-guest-link")).toBeVisible();
+  await expect(page.getByTestId("rsvp-guest-link")).toBeVisible();
   expect(await axe(page), "share dialog (dark)").toEqual([]);
+  await page.getByTestId("share-qr-toggle").click();
+  await expect(page.getByTestId("share-qr")).toBeVisible();
+  expect(await axe(page), "share dialog with the QR (dark)").toEqual([]);
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Open AI Co-Pilot" }).click();
   await page.getByRole("button", { name: "Cut ₹1.5L from decor" }).click();
@@ -113,29 +116,46 @@ test("dark mode at 375px: organizer and Guest View are axe-clean", async ({ page
   expect(await axe(page), "guest view 375 (dark)").toEqual([]);
 });
 
-test("dark mode: Guest View and the public guest page are axe-clean", async ({ page, browser }) => {
+// Hardened (v8 Part 1b): split into one test per page (the single test made eight axe runs in three browser contexts and
+// hit the 45 s timeout on a slow Windows machine), each marked slow. v8 Part 1c: the RSVP link opens the RSVP form; the form
+// and, after sending it, the confirmation (with the wishlist) are both checked.
+test("dark mode: Guest View and its concierge drawer are axe-clean", async ({ page }) => {
+  test.slow();
   await page.emulateMedia({ colorScheme: "dark" });
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   await page.getByRole("button", { name: "Guest View" }).click();
+  await expect(page.getByRole("button", { name: "Open Guest Concierge" })).toBeVisible();
   expect(await axe(page), "guest view (dark)").toEqual([]);
   await page.getByRole("button", { name: "Open Guest Concierge" }).click();
+  await expect(page.getByRole("dialog", { name: "Guest Concierge" })).toBeVisible();
   expect(await axe(page), "guest concierge drawer (dark)").toEqual([]);
-  await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Organizer" }).click();
-  for (const [t, kind] of [["wedding", "invite"], ["community", "public"], ["birthday", "invite"]] as const) {
-    await page.getByRole("combobox", { name: "Event" }).selectOption(t);
+});
+
+for (const [t, kind] of [["wedding", "invite"], ["community", "public"], ["birthday", "invite"]] as const) test(`dark mode: the public guest page (${t}, ${kind === "invite" ? "RSVP link" : "public link"}) is axe-clean`, async ({ page, browser }) => {
+  test.slow();
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.goto("/");
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  {
+    await switchEvent(page, t);
     await page.getByTestId("open-guest-links").click();
     if (await page.getByTestId("publish-guest-links").count()) await page.getByTestId("publish-guest-links").click();
-    const field = kind === "public" ? page.getByTestId("public-guest-link") : page.locator('input[data-testid^="invite-"]').first();
-    const url = await field.inputValue();
+    // v8 Part 1d: only the RSVP link is in the dialog; the old public link is the same address without #k=.
+    const rsvpUrl = await page.getByTestId("rsvp-guest-link").inputValue();
+    const url = kind === "public" ? rsvpUrl.replace(/#.*$/, "") : rsvpUrl;
     await page.keyboard.press("Escape");
     const ctx = await browser.newContext({ colorScheme: "dark" });
     const g = await ctx.newPage();
     await g.goto(url);
     await expect(g.getByTestId("public-guest-page")).toBeVisible();
+    if (kind === "invite") await expect(g.getByTestId("rsvp-form")).toBeVisible();
     expect(await theme(g)).toBe("dark");
     expect(await axe(g), `public guest page ${t} (dark)`).toEqual([]);
+    if (kind === "invite") {
+      await submitRsvp(g, { name: "Asha Rao", party: 2, functions: [t === "birthday" ? "bs2" : "s3"] });
+      expect(await axe(g), `RSVP confirmation ${t} (dark)`).toEqual([]);
+    }
     await g.getByLabel("Theme").selectOption("light");
     expect(await theme(g)).toBe("light");
     expect(await axe(g), `public guest page ${t} (light, toggled)`).toEqual([]);

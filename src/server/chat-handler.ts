@@ -27,7 +27,7 @@ export const ChatRequestSchema = z.object({
   today: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   forceOffline: z.boolean().optional(),
   role: z.enum(["organizer", "guest"]).optional(),
-  actingGuestId: z.string().max(64).nullable().optional(),
+  actingEntryId: z.string().max(64).nullable().optional(),
   /** "Get more ideas" from the Ideas page: forces one suggest_ideas call (or the offline bank). Organizer only. */
   ideas: z.object({ focus: z.string().trim().max(120).optional(), kind: IdeaKind.optional(),
     /** v6: refine one idea card ("Cheaper alternative", "Make it kid-friendly", "More traditional"). */
@@ -71,8 +71,9 @@ export async function handleChat(raw: unknown, deps: ChatDeps): Promise<HandlerR
   if (!last) return fail(400, "empty_message", "The last user message is empty");
   const today = req.data.today ?? todayIST();
   const role: Role = req.data.role ?? "organizer";
-  const actingGuestId = req.data.actingGuestId ?? null;
-  if (actingGuestId !== null && !plan.guests.some(g => g.id === actingGuestId)) return fail(400, "invalid_guest", "actingGuestId is not a guest of this event");
+  const actingEntryId = req.data.actingEntryId ?? null;
+  // v8 Part 1c: Guest View acts as one RSVP entry of this event (or nobody yet).
+  if (actingEntryId !== null && !plan.rsvpEntries.some(e => e.id === actingEntryId && !e.removedAt && !e.mergedInto)) return fail(400, "invalid_guest", "actingEntryId is not an RSVP of this event");
 
   const ideaReq = req.data.ideas;
   const vq = req.data.vendorQuestions;
@@ -81,7 +82,7 @@ export async function handleChat(raw: unknown, deps: ChatDeps): Promise<HandlerR
   if (vq && !checklistFor(plan).some(s => s.key === vq.need)) return fail(400, "invalid_need", "That isn't a vendor-checklist slot for this event");
   const offline = (): ChatResponse => (ideaReq ? runOfflineIdeas(plan, today, ideaReq.focus ?? "", ideaReq.kind, ideaReq.refine)
     : vq ? runOfflineVendorQuestions(plan, today, vq.need)
-    : role === "guest" ? runOfflineGuestAgent(plan, last, today, actingGuestId) : runOfflineAgent(plan, last, today));
+    : role === "guest" ? runOfflineGuestAgent(plan, last, today, actingEntryId) : runOfflineAgent(plan, last, today));
   if (req.data.forceOffline) return ok({ ...offline(), fallbackReason: "forced" } satisfies ChatResponseBody);
   if (!deps.apiKey || !deps.generate) {
     return ok({ ...offline(), warning: "No GEMINI_API_KEY on the server: running in deterministic Demo Mode.", fallbackReason: "no_api_key" } satisfies ChatResponseBody);
@@ -89,7 +90,7 @@ export async function handleChat(raw: unknown, deps: ChatDeps): Promise<HandlerR
   try {
     const body = ideaReq ? await runGeminiIdeas(deps.generate, plan, today, ideaReq, deps)
       : vq ? await runGeminiVendorQuestions(deps.generate, plan, today, vq.need, deps)
-      : await runGeminiLoop(deps.generate, messages, plan, today, role, actingGuestId, deps);
+      : await runGeminiLoop(deps.generate, messages, plan, today, role, actingEntryId, deps);
     return ok(body);
   } catch (e) {
     if (!(e instanceof ProviderError)) throw e; // programming errors surface as 500 in the route, never as a fake success
@@ -162,7 +163,7 @@ async function runGeminiVendorQuestions(generate: GenerateFn, plan: AgentState, 
 }
 
 async function runGeminiLoop(generate: GenerateFn, messages: z.infer<typeof ChatTurn>[], plan: AgentState, today: string, role: Role,
-  actingGuestId: string | null, deps: ChatDeps): Promise<ChatResponseBody> {
+  actingEntryId: string | null, deps: ChatDeps): Promise<ChatResponseBody> {
   const guest = role === "guest";
   const maxSteps = deps.maxSteps ?? CHAT_MAX_STEPS;
   // GEMINI_TIMEOUT_MS can lengthen a step up to 45 s; the whole turn stays under the route's 60 s maxDuration.
@@ -181,7 +182,7 @@ async function runGeminiLoop(generate: GenerateFn, messages: z.infer<typeof Chat
       res = await withDeadline(signal => generate({
         contents,
         // Rebuilt every step from `working`, so step > 0 sees the batches already staged this turn.
-        systemInstruction: guest ? GUEST_SYSTEM_PROMPT(working, actingGuestId) : SYSTEM_PROMPT(working, today),
+        systemInstruction: guest ? GUEST_SYSTEM_PROMPT(working, actingEntryId) : SYSTEM_PROMPT(working, today),
         functionDeclarations: (guest ? guestFunctionDeclarations : functionDeclarations) as unknown as FunctionDeclaration[],
         temperature: 0.2,
       }, { signal }), Math.min(stepMs, left));
@@ -204,7 +205,7 @@ async function runGeminiLoop(generate: GenerateFn, messages: z.infer<typeof Chat
       const args = call?.args;
       // Untrusted: a non-object argument is answered as a tool error, never executed.
       const out = name && (args === undefined || (typeof args === "object" && args !== null && !Array.isArray(args)))
-        ? executeAgentTool(name, args ?? {}, working, today, role)
+        ? executeAgentTool(name, args ?? {}, working, today, role, "gemini", { actingEntryId: guest ? actingEntryId : null })
         : { response: { ok: false, reason: "Malformed tool call: name must be a string and args an object" }, actions: [] as AgentAction[], working };
       actions.push(...out.actions);
       working = out.working;

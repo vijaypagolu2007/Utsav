@@ -2,13 +2,14 @@
 // The event-type card: a generic frame that renders the sections the active template's layout lists
 // (config/event-templates.ts). Each section is an ordinary component keyed by its id; configuration only picks and
 // arranges them, so a new template reuses these instead of needing a fourth hand-built layout.
-import { useRef, type ComponentType, type ReactNode } from "react";
-import { Building2, Cake, Check, ChevronDown, CircleHelp, Gift, Handshake, Heart, Megaphone, ShieldCheck, Sparkles, Timer, Users, X } from "lucide-react";
+import { useId, useRef, useState, type ComponentType, type FormEvent, type ReactNode } from "react";
+import { Building2, Cake, Check, ChevronDown, CircleHelp, ExternalLink, Eye, EyeOff, Gift, Handshake, Heart, Megaphone, Plus, ShieldCheck, Sparkles, Timer, Trash2, Users, X } from "lucide-react";
+import ApprovalPreview from "./ApprovalPreview";
 import type { AgentState, SponsorTier } from "@/schema";
 import { daysBetween } from "@/commands";
 import type { Commit, Highlight } from "./PlannerApp";
 import { refAnchor } from "@/routes";
-import { Badge, Card, Empty, InlineEdit, inr, longDate, priorityTone, relDays, saveWith, useElementWidth, useHighlight, type Tone } from "./ui";
+import { Badge, Card, Empty, IconButton, InlineEdit, inr, longDate, parseInline, relDays, saveWith, useElementWidth, useHighlight, type Tone } from "./ui";
 import { sponsorProgress } from "@/budget-a11y";
 import { formatTokens, templateTokens, type EventTemplate, type OrganizerSectionId } from "@/config/event-templates";
 import { GUEST_RSVP_ANSWERS, labelOf, PERMIT_STATUS_OPTIONS, RSVP_CYCLE, RSVP_LABELS, SPONSOR_STATUS_OPTIONS, SPONSOR_TIER_OPTIONS } from "@/config/planner-options";
@@ -174,6 +175,7 @@ function RsvpHouseholds({ plan, commit, highlight, subs }: SectionProps & { subs
 }
 
 const sel = "min-h-9 rounded-lg border border-line-strong bg-surface px-2 text-sm text-ink max-md:min-h-11 pointer-coarse:min-h-11";
+const field = "mt-1 block min-h-10 w-full rounded-lg border border-line-strong bg-surface px-2.5 text-sm text-ink max-md:min-h-11";
 function SubHead({ icon, children, right }: { icon: ReactNode; children: ReactNode; right?: ReactNode }) {
   return (
     <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -210,32 +212,122 @@ function DietSummary({ plan }: SectionProps) {
   );
 }
 
-/** Birthday: the gift wishlist, with who claimed each wish. */
+/**
+ * Birthday wishlist / wedding gift registry (v8 Part 1): add, edit and remove gifts, record who claimed each one, and
+ * surprise mode. In surprise mode this view hides who claimed (the honoree may be looking over the organiser's
+ * shoulder) until "Show who claimed" is pressed, and the public link hides which gifts are claimed.
+ */
 function WishlistManager({ plan, commit, highlight }: SectionProps) {
   const hl = useHighlight(highlight);
   const ext = plan.event.ext;
-  if (ext.type !== "birthday") return null;
+  const [draft, setDraft] = useState({ item: "", price: "", url: "", priority: "med" });
+  const [error, setError] = useState<string | null>(null);
+  const [reveal, setReveal] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const formId = useId();
+  if (ext.type !== "birthday" && ext.type !== "wedding") return null;
+  const registry = ext.type === "wedding";
+  const noun = registry ? "registry" : "wishlist";
+  const surprise = ext.wishlistSurprise;
+  const showClaimers = !surprise || reveal;
+  const add = (e: FormEvent) => {
+    e.preventDefault();
+    const item = draft.item.trim();
+    if (!item) { setError("Enter the gift."); return; }
+    let rupeesN: number | undefined;
+    if (draft.price.trim()) {
+      const p = parseInline("rupees", draft.price);
+      if (!p.ok) { setError(p.error); return; }
+      rupeesN = (p.value as number) / 100;
+    }
+    const r = commit({ summary: `Add ${item} to the ${noun}`, commands: [{ op: "add_wishlist_item", item, priority: draft.priority as "low" | "med" | "high",
+      ...(draft.url.trim() ? { url: draft.url.trim() } : {}), ...(rupeesN !== undefined ? { approxRupees: rupeesN } : {}) }] });
+    if (!r.ok) { setError(r.reason); return; }
+    setError(null); setDraft({ item: "", price: "", url: "", priority: draft.priority });
+  };
+  const upd = (id: string, patch: Record<string, unknown>, summary: string) => saveWith(commit, { summary, commands: [{ op: "update_wishlist_item", itemId: id, ...patch }] });
+  const removingItem = ext.wishlist.find(w => w.id === removing);
   return (
-    <div className="min-w-0">
-      <SubHead icon={<Gift size={16} className="text-brand-700" />}>Gift wishlist</SubHead>
-      {ext.wishlist.length === 0 ? <Empty>No wishes yet.</Empty> : (
+    <div className="min-w-0" data-testid="wishlist-manager">
+      <SubHead icon={<Gift size={16} className="text-brand-700" />} right={<>{ext.wishlist.filter(w => w.claimedByGuestId).length} of {ext.wishlist.length} claimed</>}>{registry ? "Gift registry" : "Gift wishlist"}</SubHead>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <button type="button" aria-pressed={surprise} data-testid="wish-surprise"
+          onClick={() => { commit({ summary: surprise ? "Surprise mode off" : "Surprise mode on", commands: [{ op: "set_wishlist_surprise", on: !surprise }] }); setReveal(false); }}
+          className={`flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium max-md:min-h-11 pointer-coarse:min-h-11 ${surprise ? "border-brand-700 bg-brand-50 text-brand-800" : "border-line-strong bg-surface text-sand-800 hover:bg-sand-100"}`}>
+          {surprise ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />} Surprise mode {surprise ? "on" : "off"}
+        </button>
+        {surprise && (
+          <button type="button" aria-pressed={reveal} onClick={() => setReveal(v => !v)} data-testid="wish-reveal"
+            className="min-h-9 rounded-lg px-2 text-sm font-medium text-brand-800 underline-offset-2 hover:underline max-md:min-h-11 pointer-coarse:min-h-11">{reveal ? "Hide who claimed" : "Show who claimed"}</button>
+        )}
+      </div>
+      {surprise && <p className="mb-3 text-sm text-ink-muted" data-testid="wish-surprise-note">Surprise mode: the public link doesn&apos;t show which gifts are claimed, and this list hides who claimed them.</p>}
+      {ext.wishlist.length === 0 ? <Empty>{registry ? "No gifts on the registry yet." : "No wishes yet."}</Empty> : (
         <ul className="space-y-2">
           {ext.wishlist.map(w => (
-            <li key={w.id} id={refAnchor(w.id)} className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl p-3 ring-1 ring-inset ${w.claimedByGuestId ? "bg-emerald-50/60 ring-emerald-200" : w.priority === "high" ? "ring-amber-300" : "ring-line"} ${hl(w.id)}`}>
-              <div className="min-w-0 flex-1 basis-40">
-                <p className="break-words text-base font-medium text-ink">{w.item}</p>
-                <div className="mt-1 flex flex-wrap gap-1.5"><Badge tone={priorityTone(w.priority)} className="capitalize">{w.priority}<span className="sr-only"> priority</span></Badge>{w.approxPaise !== undefined && <Badge><span className="tabular-nums">~{inr(w.approxPaise)}</span></Badge>}</div>
+            <li key={w.id} id={refAnchor(w.id)} data-testid={`wish-${w.id}`} className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl p-3 ring-1 ring-inset ${w.claimedByGuestId ? "bg-emerald-50/60 ring-emerald-200" : w.priority === "high" ? "ring-amber-300" : "ring-line"} ${hl(w.id)}`}>
+              <div className="min-w-0 flex-1 basis-48">
+                <InlineEdit label={`gift ${w.item}`} value={w.item} onSave={(item: string) => upd(w.id, { item }, `Rename gift ${w.item}`)}>
+                  <p className="break-words text-base font-medium text-ink">{w.item}</p>
+                </InlineEdit>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <select value={w.priority} aria-label={`Priority of ${w.item}`} onChange={e => upd(w.id, { priority: e.target.value }, `Priority of ${w.item}`)} className={`${sel} min-h-8`}>
+                    <option value="high">High priority</option><option value="med">Medium priority</option><option value="low">Low priority</option>
+                  </select>
+                  <InlineEdit label={`price of ${w.item}`} kind="rupees" value={w.approxPaise !== undefined ? String(w.approxPaise / 100) : ""} inputSize="w-32"
+                    onSave={(paise: number) => upd(w.id, { approxRupees: paise / 100 }, `Price of ${w.item}`)}>
+                    {w.approxPaise !== undefined ? <Badge><span className="tabular-nums">~{inr(w.approxPaise)}</span></Badge> : <span className="text-sm text-ink-muted">No price</span>}
+                  </InlineEdit>
+                  <InlineEdit label={`shop link for ${w.item}`} value={w.url ?? ""} inputSize="w-64" hint="A full https:// link"
+                    onSave={(url: string) => upd(w.id, { url }, `Link for ${w.item}`)}>
+                    {w.url ? <a href={w.url} target="_blank" rel="noopener noreferrer nofollow" className="inline-flex min-h-8 items-center gap-1 text-sm font-medium text-brand-800 underline">
+                      <ExternalLink size={13} aria-hidden="true" />Shop link<span className="sr-only"> for {w.item} (opens in a new tab)</span></a> : <span className="text-sm text-ink-muted">No link</span>}
+                  </InlineEdit>
+                </div>
               </div>
-              <select value={w.claimedByGuestId ?? ""} aria-label={`Who claimed ${w.item}`}
-                onChange={e => commit({ summary: `Wishlist ${w.item}`, commands: [{ op: "claim_wishlist_item", itemId: w.id, guestId: e.target.value || null }] })}
-                className={`${sel} max-w-44 ${w.claimedByGuestId ? "border-emerald-600 bg-emerald-50 text-emerald-900" : ""}`}>
-                <option value="">Unclaimed</option>
-                {plan.guests.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-              </select>
+              {showClaimers ? (
+                <select value={w.claimedByGuestId ?? ""} aria-label={`Who claimed ${w.item}`}
+                  onChange={e => commit({ summary: `Wishlist ${w.item}`, commands: [{ op: "claim_wishlist_item", itemId: w.id, guestId: e.target.value || null }] })}
+                  className={`${sel} max-w-44 ${w.claimedByGuestId ? "border-emerald-600 bg-emerald-50 text-emerald-900" : ""}`}>
+                  <option value="">Unclaimed</option>
+                  {plan.guests.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  {/* v8 Part 1c: a claim from the open RSVP link is held by that RSVP. */}
+                  {plan.rsvpEntries.filter(e => !e.removedAt && !e.mergedInto).map(e => <option key={e.id} value={e.id}>{e.name} (RSVP)</option>)}
+                </select>
+              ) : <Badge tone={w.claimedByGuestId ? "success" : "neutral"}>{w.claimedByGuestId ? "Claimed" : "Unclaimed"}</Badge>}
+              <IconButton label={`Remove ${w.item}`} onClick={() => setRemoving(w.id)} data-testid={`wish-remove-${w.id}`}><Trash2 size={15} /></IconButton>
             </li>
           ))}
         </ul>
       )}
+      {removingItem && (
+        <div className="mt-3">
+          <ApprovalPreview plan={plan} batch={{ summary: `Remove ${removingItem.item}`, commands: [{ op: "remove_wishlist_item", itemId: removingItem.id }] }} label={`Review: remove ${removingItem.item}`}
+            testId="wish-remove-preview" onCancel={() => setRemoving(null)}
+            onApprove={() => { commit({ summary: `Remove ${removingItem.item}`, commands: [{ op: "remove_wishlist_item", itemId: removingItem.id }] }); setRemoving(null); }} />
+        </div>
+      )}
+      <form onSubmit={add} noValidate className="mt-3 grid gap-2 rounded-xl border border-dashed border-line-strong p-3 sm:grid-cols-2" aria-labelledby={`${formId}-h`} data-testid="wish-add-form">
+        <h4 id={`${formId}-h`} className="text-sm font-semibold text-ink sm:col-span-2">Add a gift</h4>
+        <label className="text-sm text-ink-muted sm:col-span-2">Gift
+          <input value={draft.item} onChange={e => setDraft({ ...draft, item: e.target.value })} maxLength={120} data-testid="wish-add-item" aria-describedby={error ? `${formId}-err` : undefined} className={field} />
+        </label>
+        <label className="text-sm text-ink-muted">Approximate price (₹, optional)
+          <input value={draft.price} onChange={e => setDraft({ ...draft, price: e.target.value })} inputMode="numeric" data-testid="wish-add-price" className={field} />
+        </label>
+        <label className="text-sm text-ink-muted">Priority
+          <select value={draft.priority} onChange={e => setDraft({ ...draft, priority: e.target.value })} data-testid="wish-add-priority" className={field}>
+            <option value="high">High</option><option value="med">Medium</option><option value="low">Low</option>
+          </select>
+        </label>
+        <label className="text-sm text-ink-muted sm:col-span-2">Shop link (https only, optional)
+          <input value={draft.url} onChange={e => setDraft({ ...draft, url: e.target.value })} type="url" inputMode="url" placeholder="https://" maxLength={500} data-testid="wish-add-url" className={field} />
+        </label>
+        {error && <p id={`${formId}-err`} role="alert" className="text-sm font-medium text-danger sm:col-span-2">{error}</p>}
+        <button type="submit" data-testid="wish-add-submit" className="flex min-h-10 items-center justify-center gap-1.5 justify-self-start rounded-lg bg-primary px-4 text-sm font-semibold text-white hover:bg-primary-hover max-md:min-h-11">
+          <Plus size={15} aria-hidden="true" /> Add to {noun}
+        </button>
+      </form>
     </div>
   );
 }

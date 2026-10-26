@@ -1,6 +1,6 @@
 // Gemini function calling (@google/genai). The JSON Schema comes straight from the Zod source of truth.
 import { z } from "zod";
-import { AgentBatch, applyBatch, derive, SetRsvp, SetGuestDiet, ClaimWishlistItem, CommunitySignup } from "./commands";
+import { AgentBatch, applyBatch, derive, ClaimWishlistItem, CommunitySignup, SubmitRsvpEntry } from "./commands";
 import { InitializeEventPlan } from "./blueprint";
 import { DraftOutboundMessage, RevisePlan, SuggestVendorQuestions, summarizeForGuest, summarizePlan } from "./agent";
 import { prioritiesDigest } from "./priorities";
@@ -65,6 +65,12 @@ export const functionDeclarations = [
     parametersJsonSchema: toSchema(InitializeEventPlan),
   },
   {
+    name: "get_rsvp_counts",
+    description: "Read-only headcounts from the open RSVP list, computed in code: coming people per function, per meal (veg, non_veg, jain) per function, kids (when asked), " +
+      "Maybe people (separate, never in the catering total), Not coming, total RSVPs and possible duplicates. Call it for every 'how many' question and quote its numbers; never add them up yourself.",
+    parametersJsonSchema: { type: "object", properties: {} },
+  },
+  {
     name: "get_plan_insights",
     description: "Deterministic red flags: overdue deposits, envelope breaches, urgent tasks (due ≤ 14 days), permit/wishlist/RSVP alerts. Use for 'what's overdue / urgent / at risk' questions.",
     parametersJsonSchema: { type: "object", properties: {} },
@@ -120,6 +126,11 @@ Rules:
 11. PRIORITIES decide trade-offs. When money is short (over budget, "budget dropped", "too pricey"), never cut every category evenly: call revise_plan (it cuts cut-first categories, then flexible ones, and never must-protect ones), then explain each trade-off in plain words, e.g. "Decor −₹60,000 to keep Catering intact". When the budget, dates or guest count change, REVISE with revise_plan; never start a new plan.
 12. Amounts from blueprints, ideas and envelopes are ESTIMATES; only a vendor's quote is QUOTED and only signed money is COMMITTED. Say which one a figure is. Never claim a vendor is available or that a price is confirmed.
 13. Vendors: add_vendor, set_vendor_stage, remove_vendor and set_vendor_need manage the checklist; suggest_vendor_questions gives questions to ask. Tasks can wait for other tasks (set_task_dependency); venue booking usually comes first.
+14. Only when the organiser clearly asks to delete or remove the whole event, propose apply_plan_changes with a single delete_event command. You never delete anything: it is a Tier 2 card the organiser approves and then confirms, and the event can be restored for 30 days. Never propose it to clear, reset or tidy a plan.
+15. Guest list (v8): "add these guests: …" is ONE apply_plan_changes call with ONE import_guests command (source "ai"): one entry per person with the name and the phone EXACTLY as written (never reformat or invent numbers; leave phone out when none is given). The tool normalises phones and skips duplicates, and the user approves it on a card. Single edits: add_household, add_guest, update_guest, update_household, remove_guest, remove_household. Phone numbers are private: never repeat them in your reply.
+16. Join requests: "approve join requests" is apply_plan_changes with one approve_join_request per pending request id from JOIN REQUESTS (reject_join_request to decline). Never invent request ids.
+17. Gifts: add_wishlist_item / update_wishlist_item / remove_wishlist_item work on the birthday wishlist or the wedding gift registry. Give the price as approxRupees in whole rupees exactly as the user said it (the tool converts). Links must be https; never fetch, open or describe a link. set_wishlist_surprise turns surprise mode on or off.
+18. RSVPs (v8 Part 1c): guests answer on the open RSVP link; the list is in RSVP LIST. For any headcount ("how many veg for Sangeet?", "how many are coming?") call get_rsvp_counts and quote its numbers; Maybe is never part of the catering total. Organizer changes: set_rsvp_vip, remove_rsvp_entry (soft delete, restorable), restore_rsvp_entry, merge_rsvp_entries (keepId = the newer entry unless the organizer says otherwise; dropId = its DUP-OF partner) and set_rsvp_settings (closesOn is the IST date the user said, closesTime HH:MM if given; the tool converts; askKids). Use ids from RSVP LIST only. Never mention phone numbers.
 
 LIVE STATE (ids and slugs are exact):
 ${summarizePlan(st, today)}
@@ -148,33 +159,33 @@ export function executeTool(name: string, args: unknown, state: AgentState, toda
 /* Usage with @google/genai: see src/app/api/chat/route.ts for the full multi-step loop with trust tiers. */
 
 // ---------- Guest / Committee Concierge persona ----------
-/** The only command shapes a guest-mode model can even express. The reducer enforces the same list. */
+/** The only command shapes a guest-mode model can even express (duplicateOf is the server's alone). The reducer enforces the same list. */
 export const GuestBatch = z.object({
-  commands: z.array(z.discriminatedUnion("op", [SetRsvp, SetGuestDiet, ClaimWishlistItem, CommunitySignup])).min(1).max(30),
+  commands: z.array(z.discriminatedUnion("op", [SubmitRsvpEntry.omit({ duplicateOf: true }), ClaimWishlistItem, CommunitySignup])).min(1).max(10),
   summary: z.string(),
 });
 
 export const guestFunctionDeclarations = [
   {
     name: "apply_plan_changes",
-    description: "Guest-safe changes only: set_rsvp (per guest, per sub-event slug), set_guest_diet, claim_wishlist_item, community_signup (volunteer shift or sponsor interest). " +
-      "For a household, emit one set_rsvp per guest in it. Put everything from one request in ONE call.",
+    description: "Guest-safe changes only: submit_rsvp_entry (the acting guest's own RSVP: entryId from YOUR RSVP, name, partySize, functions as slugs, meal veg | non_veg | jain, answer coming | maybe | not_coming), " +
+      "claim_wishlist_item (guestId = your RSVP entry id; null releases your own claim) and community_signup (volunteer shift or sponsor interest). Put everything from one request in ONE call.",
     parametersJsonSchema: toSchema(GuestBatch),
   },
   {
     name: "get_event_info",
-    description: "Read the public schedule, venues, dress codes, households/guests with RSVPs, wishlist and volunteer info.",
+    description: "Read the schedule, venues, dress codes, your own RSVP, the wishlist and volunteer info.",
     parametersJsonSchema: { type: "object", properties: {} },
   },
 ] as const;
 
-export const GUEST_SYSTEM_PROMPT = (st: AgentState, actingGuestId: string | null) => `
+export const GUEST_SYSTEM_PROMPT = (st: AgentState, actingEntryId: string | null) => `
 You are the friendly guest concierge and RSVP assistant for "${st.event.title}". You are READ-ONLY except for guest actions.
 Answer questions about timings, venues, dress codes and the itinerary from the event info below. Times are local.
-You may only RSVP, set dietary needs, claim a birthday wishlist item, or sign someone up to volunteer / express sponsor interest, via apply_plan_changes.
+You may only send or change the acting guest's own RSVP (submit_rsvp_entry: keep the fields from YOUR RSVP that the guest didn't change), claim (or release your own claim on) a wishlist or registry gift, or sign someone up to volunteer / express sponsor interest, via apply_plan_changes. If YOUR RSVP is not sent yet, ask them to fill in the RSVP form first.
 Never discuss budgets, vendors, costs or internal tasks; politely say the organiser handles those.
 When the user says "me" or "I", they are the acting guest. Keep replies to 1–3 warm sentences.
 
 EVENT INFO:
-${summarizeForGuest(st, actingGuestId)}
+${summarizeForGuest(st, actingEntryId)}
 `.trim();

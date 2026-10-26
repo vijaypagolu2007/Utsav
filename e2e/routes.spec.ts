@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { skipWelcome, openPageNav } from "./helpers";
+import { expectHighlighted, expectSectionHighlighted, skipWelcome, openPageNav, switchEvent, trackHighlights } from "./helpers";
 
 // Round 3: the organizer dashboard as separate pages (/, /budget, /tasks, /schedule, /event) sharing one client-side
 // plan state in the (planner) layout. Same Demo Mode build and file store as the other specs.
@@ -10,6 +10,7 @@ test.beforeEach(async ({ page }) => {
   pageErrors.length = 0;
   page.on("pageerror", e => pageErrors.push(e.message));
   await skipWelcome(page);
+  await trackHighlights(page);
 });
 test.afterEach(() => { expect(pageErrors, "uncaught client-side exceptions").toEqual([]); });
 
@@ -20,6 +21,7 @@ const ROUTES = [
   { path: "/tasks", name: "Tasks", title: "Tasks · Utsav Co-Pilot", section: "tasks" },
   { path: "/schedule", name: "Schedule", title: "Schedule · Utsav Co-Pilot", section: "schedule" },
   { path: "/event", name: "Event", title: "Event · Utsav Co-Pilot", section: "event" },
+  { path: "/guests", name: "Guests", title: "Guests · Utsav Co-Pilot", section: "guests" },
   { path: "/ideas", name: "Ideas", title: "Ideas · Utsav Co-Pilot", section: "ideas" },
 ] as const;
 type RouteName = (typeof ROUTES)[number]["name"];
@@ -74,14 +76,14 @@ for (const r of ROUTES) {
   });
 }
 
-test("the page links are real routes in nav order, and /guests leads to the Event page", async ({ page }) => {
+test("the page links are real routes in nav order, and /guests is the Guests page (v8 Part 1: no longer an alias of /event)", async ({ page }) => {
   await page.goto("/");
   const links = nav(page).getByRole("link");
   await expect(links).toHaveText(ROUTES.map(r => r.name));
   for (const [i, r] of ROUTES.entries()) await expect(links.nth(i)).toHaveAttribute("href", r.path);
   await page.goto("/guests");
-  await expect(page).toHaveURL(/\/event$/);
-  await expect(h1(page)).toHaveText("Event");
+  await expect(page).toHaveURL(/\/guests$/);
+  await expect(h1(page)).toHaveText("Guests");
 });
 
 test("client navigation: aria-current moves, the <title> changes and focus lands on the new page's h1", async ({ page }) => {
@@ -185,7 +187,7 @@ test("an AI change to another page is linked from the drawer, and the link opens
   await expect(page).toHaveURL(/\/budget$/);
   await expect(h1(page)).toBeFocused();
   // The highlight shows on the page that changed (it pulses for three seconds).
-  await expect(page.locator("#budget .hl-a, #budget .hl-b").first()).toBeVisible();
+  await expectSectionHighlighted(page, "budget");
 });
 
 // ---------- Show me ----------
@@ -199,7 +201,8 @@ async function showMeAndCheck(page: Page, name: RegExp, path: string, section: s
   await expect(page.locator(`#${ref}`)).toBeFocused();
   await expect(page.locator(`#${ref}`)).toBeInViewport();
   expect(await page.locator(`#${ref}`).evaluate((el, s) => !!el.closest(`section#${s}`), section)).toBe(true);
-  await expect(page.locator(`#${ref}`)).toHaveClass(/hl-[ab]/);
+  // Hardened (v8 Part 1b): the highlight is transient (about 3 s), so assert it was applied rather than that it is still on.
+  await expectHighlighted(page, ref);
 }
 
 test("Needs attention: Show me opens the page that owns each flag and focuses the flagged row", async ({ page }) => {
@@ -223,7 +226,7 @@ test("deep links: a fresh load of /budget, and of /budget#ref-b1, which focuses 
   await page.goto("/budget#ref-b1");
   await expect(page.locator("#ref-b1")).toBeFocused();
   await expect(page.locator("#ref-b1")).toBeInViewport();
-  await expect(page.locator("#ref-b1")).toHaveClass(/hl-[ab]/);
+  await expectHighlighted(page, "ref-b1");
 });
 
 // ---------- mobile ----------
@@ -268,17 +271,22 @@ for (const scheme of ["light", "dark"] as const) {
   });
 }
 
-test("axe: the Event page for each event type, light and dark", async ({ page }) => {
-  for (const scheme of ["light", "dark"] as const) {
+// Hardened (v8 Part 1b): one test per scheme, marked slow (six axe runs timed out at 45 s on a slow Windows machine), and
+// each run waits for the switched event's page to settle before axe reads it.
+for (const scheme of ["light", "dark"] as const) {
+  test(`axe: the Event page for each event type (${scheme})`, async ({ page }) => {
+    test.slow();
     await page.emulateMedia({ colorScheme: scheme });
     await page.goto("/event");
     await expect(h1(page)).toBeVisible();
     for (const t of ["birthday", "community", "wedding"]) {
-      await page.getByRole("combobox", { name: "Event" }).selectOption(t);
+      await switchEvent(page, t);
+      await expect(page.locator("html")).toHaveAttribute("data-theme", scheme);
+      await expect(h1(page)).toHaveText("Event");
       expect(await axe(page), `/event ${t} (${scheme})`).toEqual([]);
     }
-  }
-});
+  });
+}
 
 for (const width of [320, 375, 768, 1280]) {
   test(`no horizontal overflow at ${width}px on any route (each event type)`, async ({ page }) => {
@@ -286,7 +294,7 @@ for (const width of [320, 375, 768, 1280]) {
     await page.goto("/");
     await expect(h1(page)).toBeVisible();
     for (const t of ["birthday", "community", "wedding"]) {
-      await page.getByRole("combobox", { name: "Event" }).selectOption(t);
+      await switchEvent(page, t);
       for (const r of ROUTES) {
         await openPage(page, r.name);
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);

@@ -496,7 +496,7 @@ describe("ideas over /api/chat (mocked Gemini)", () => {
     const b = r.body as ChatResponseBody;
     assert.equal(b.mode, "offline");
     assert.equal(b.fallbackReason, "malformed_response");
-    assert.equal((await handleChat(ask({ role: "guest", actingGuestId: "g1" }), { apiKey: null })).status, 403);
+    assert.equal((await handleChat(ask({ role: "guest" }), { apiKey: null })).status, 403);
     assert.equal((await handleChat(ask({ ideas: { focus: "x", sneaky: true } }), { apiKey: null })).status, 400);
   });
   test("the chat loop executes suggest_ideas from conversation ('give me sangeet ideas')", async () => {
@@ -548,7 +548,7 @@ describe("prompt chips follow the plan", () => {
 
 describe("routes", () => {
   test("Ideas and Vendors are nav pages; /setup is outside the nav", () => {
-    assert.deepEqual(PAGES.map(p => p.href), ["/", "/budget", "/vendors", "/tasks", "/schedule", "/event", "/ideas"]);
+    assert.deepEqual(PAGES.map(p => p.href), ["/", "/budget", "/vendors", "/tasks", "/schedule", "/event", "/guests", "/ideas"]);
     assert.equal(pageForPath("/ideas").id, "ideas");
   });
 });

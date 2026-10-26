@@ -1,5 +1,6 @@
-// Organizer-only: GET the full shared plan, PUT a new version (optimistic concurrency via baseVersion).
-import { EVENTS_MAX_BODY_BYTES, getOrganizerEvent, putOrganizerEvent } from "@/server/events";
+// Organizer-only: GET the full shared plan, PUT a new version (optimistic concurrency via baseVersion),
+// PATCH { removed } to switch the guest links off while the event is deleted (v8 Part 0c).
+import { EVENTS_MAX_BODY_BYTES, getOrganizerEvent, putOrganizerEvent, setOrganizerEventRemoved } from "@/server/events";
 import { bearerToken, fail, logServer, readJsonLimited, toResponse } from "@/server/http";
 
 export const runtime = "nodejs";
@@ -21,4 +22,11 @@ export async function PUT(request: Request, ctx: Ctx) {
   const body = await readJsonLimited(request, EVENTS_MAX_BODY_BYTES);
   if (!body.ok) return toResponse(body.result);
   try { return toResponse(await putOrganizerEvent(id, bearerToken(request), body.value)); } catch (e) { return internal("put", e); }
+}
+
+export async function PATCH(request: Request, ctx: Ctx) {
+  const { id } = await ctx.params;
+  const body = await readJsonLimited(request, 1024);
+  if (!body.ok) return toResponse(body.result);
+  try { return toResponse(await setOrganizerEventRemoved(id, bearerToken(request), body.value)); } catch (e) { return internal("patch", e); }
 }

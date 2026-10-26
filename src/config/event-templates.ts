@@ -23,7 +23,7 @@ export const ORGANIZER_SECTIONS = {
   "rsvp-matrix": "any",
   "couple-profile": ["wedding"],
   "diet-summary": "any",
-  "wishlist-manager": ["birthday"],
+  "wishlist-manager": ["birthday", "wedding"],
   "activity-run-sheet": ["birthday"],
   "sponsor-pipeline": ["community"],
   "permit-tracker": ["community"],
@@ -31,7 +31,7 @@ export const ORGANIZER_SECTIONS = {
 
 export const GUEST_SECTIONS = {
   "guest-rsvp": "any",
-  "guest-wishlist": ["birthday"],
+  "guest-wishlist": ["birthday", "wedding"],
   "community-signup": ["community"],
 } as const satisfies Record<string, "any" | readonly EventType[]>;
 
@@ -134,7 +134,7 @@ export const TemplateRegistry = z.array(EventTemplate).min(1).superRefine((list,
 // ---------------------------------------------------------------- the registry
 const WEDDING_LAYOUT = {
   heading: "Wedding · RSVP Matrix & Traditions", icon: "heart", arrangement: "main-aside",
-  columns: [["rsvp-matrix"], ["couple-profile", "diet-summary"]],
+  columns: [["rsvp-matrix"], ["couple-profile", "diet-summary", "wishlist-manager"]],
 } as const;
 const BIRTHDAY_LAYOUT = {
   heading: "Birthday · {honoree}[ turns {turningAge}] · {theme}", icon: "cake", arrangement: "two-up",
@@ -155,7 +155,7 @@ const DEFINITIONS = [
     id: "wedding", name: "Royal Wedding", eventType: "wedding", accent: "rose",
     description: "Five-day Telugu wedding in Hyderabad: Haldi to Reception, 300 guests, an RSVP matrix and vendor deposits.",
     seed: royalWedding, layout: WEDDING_LAYOUT,
-    guest: { kicker: "You're invited to celebrate", tagline: "[{partners}]", aside: ["guest-rsvp"], footer: [] },
+    guest: { kicker: "You're invited to celebrate", tagline: "[{partners}]", aside: ["guest-rsvp", "guest-wishlist"], footer: [] },
   },
   {
     id: "birthday", name: "30th Arcade Birthday", eventType: "birthday", accent: "violet",

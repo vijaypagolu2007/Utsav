@@ -14,15 +14,17 @@ service cloud.firestore {
         return planKey.matches('^[a-z0-9][a-z0-9-]{0,39}$');
       }
       // Exactly the fields the server writes; plan ≤ MAX_PLAN_BYTES (400 KiB, src/server/events.ts).
+      // deletedAt (v8 Part 0c) is the tombstone of a deleted event; a save without it restores the event.
       function validShape(d) {
-        return d.keys().hasOnly(['plan', 'version', 'updatedAt', 'title', 'eventType', 'schema'])
+        return d.keys().hasOnly(['plan', 'version', 'updatedAt', 'title', 'eventType', 'schema', 'deletedAt'])
           && d.keys().hasAll(['plan', 'version', 'updatedAt'])
           && d.plan is string && d.plan.size() <= 409600
           && d.version is int
           && d.updatedAt is timestamp
           && (!('title' in d) || (d.title is string && d.title.size() <= 200))
           && (!('eventType' in d) || (d.eventType is string && d.eventType.size() <= 40))
-          && (!('schema' in d) || d.schema == 1);
+          && (!('schema' in d) || d.schema == 1)
+          && (!('deletedAt' in d) || d.deletedAt is timestamp);
       }
       allow read: if isOwner();
       allow create: if isOwner() && validKey() && validShape(request.resource.data)
@@ -30,7 +32,8 @@ service cloud.firestore {
       allow update: if isOwner() && validKey() && validShape(request.resource.data)
         && resource.data.version is int
         && request.resource.data.version == resource.data.version + 1;
-      allow delete: if false;
+      // "Delete forever" (v8 Part 0c): the server only sends it for a tombstoned copy, with an updateTime precondition.
+      allow delete: if isOwner() && validKey();
     }
     // Everything else is denied.
     match /{document=**} {

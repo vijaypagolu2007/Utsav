@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { skipWelcome, openPageNav } from "./helpers";
+import { submitRsvp, skipWelcome, openPageNav, switchEvent } from "./helpers";
 
 // Every test starts from a clean browser profile (fresh localStorage), so state never leaks between tests.
 const pageErrors: string[] = [];
@@ -43,7 +43,7 @@ test("loads without an API key and says it is in Demo Mode", async ({ page }) =>
 });
 
 test("wedding: Tier-1 diff → approve → budget and dates stay valid → refresh keeps it", async ({ page }) => {
-  await page.getByRole("combobox", { name: "Event" }).selectOption("wedding");
+  await switchEvent(page, "wedding");
   const before = rupees(await kpi(page, "planned").innerText());
   await ask(page, "Cut ₹20k from decor and move the Haldi to Friday");
   const card = page.getByTestId("diff-card").last();
@@ -96,7 +96,7 @@ test("Guest View hides organizer controls", async ({ page }) => {
   await openPage(page, "Budget");
   // These are visible to the organizer first, so their absence below is a real check rather than a vacuous one.
   const organizerOnly = [page.getByTestId("open-guest-links"), page.getByRole("button", { name: "More", exact: true }),
-    page.getByRole("button", { name: "Undo" }), page.getByRole("button", { name: /red flag/ }), page.getByRole("combobox", { name: "Event" }),
+    page.getByRole("button", { name: "Undo" }), page.getByRole("button", { name: /red flag/ }), page.getByTestId("event-switcher"),
     page.getByRole("button", { name: /^Edit planned amount for / }).first()];
   for (const c of organizerOnly) await expect(c).toBeVisible();
   await page.getByRole("button", { name: "Guest View" }).click();
@@ -121,10 +121,10 @@ test("server refuses organizer mutations from a guest link", async ({ request })
 });
 
 test("guest link works in a separate browser context and the organizer sees the RSVP", async ({ page, browser }) => {
-  await page.getByRole("combobox", { name: "Event" }).selectOption("wedding");
+  await switchEvent(page, "wedding");
   await page.getByTestId("open-guest-links").click();
   await page.getByTestId("publish-guest-links").click();
-  const inviteInput = page.locator('input[data-testid^="invite-"]').first();
+  const inviteInput = page.getByTestId("rsvp-guest-link");
   await expect(inviteInput).toBeVisible();
   const url = await inviteInput.inputValue();
 
@@ -132,11 +132,10 @@ test("guest link works in a separate browser context and the organizer sees the 
   const guest = await guestCtx.newPage();
   await guest.goto(url);
   await expect(guest.getByTestId("public-guest-page")).toBeVisible();
-  await expect(guest.getByText("Your RSVP").first()).toBeVisible();
+  // v8 Part 1c: the RSVP link opens one form per family.
   await expect(guest.getByText(/₹|Planned|Vendor/)).toHaveCount(0);
-  const first = guest.getByRole("button", { name: "maybe" }).first();
-  await first.click();
-  await expect(guest.getByRole("status")).toContainText("maybe");
+  await submitRsvp(guest, { name: "Asha Rao", party: 2, functions: ["s3"], answer: "maybe" });
+  await expect(guest.getByTestId("rsvp-summary-answer")).toHaveText("Maybe");
   await guestCtx.close();
 
   await page.getByRole("button", { name: "Sync now" }).click();
@@ -146,10 +145,10 @@ test("guest link works in a separate browser context and the organizer sees the 
 // ---------- shared-event sync: no request storm, no lost updates ----------
 type Share = { eventId: string; organizerToken: string; version: number };
 async function publishWedding(page: Page) {
-  await page.getByRole("combobox", { name: "Event" }).selectOption("wedding");
+  await switchEvent(page, "wedding");
   await page.getByTestId("open-guest-links").click();
   await page.getByTestId("publish-guest-links").click();
-  const invite = page.locator('input[data-testid^="invite-"]').first();
+  const invite = page.getByTestId("rsvp-guest-link");
   await expect(invite).toBeVisible();
   const url = await invite.inputValue();
   const share = await page.evaluate(() => (JSON.parse(localStorage.getItem("utsav_share_v1") ?? "{}") as Record<string, Share>).wedding);
@@ -171,18 +170,17 @@ test("guest RSVP and an organizer budget edit made at the same time both survive
   const { url, share } = await publishWedding(page);
   const before = rupees(await kpi(page, "planned").innerText());
   const auth = { authorization: `Bearer ${share.organizerToken}` };
-  type ServerPlan = { guests: { rsvp: Record<string, string> }[]; budgetItems: { plannedPaise: number }[] };
+  type ServerPlan = { rsvpEntries: { name: string }[]; budgetItems: { plannedPaise: number }[] };
   const planned = (p: ServerPlan) => p.budgetItems.reduce((n, b) => n + b.plannedPaise, 0);
-  const maybes = (p: ServerPlan) => p.guests.flatMap(g => Object.values(g.rsvp)).filter(a => a === "maybe").length;
   const start = (await (await request.get(`/api/events/${share.eventId}`, { headers: auth })).json()).plan as ServerPlan;
-  const maybesBefore = maybes(start), plannedBefore = planned(start);
+  const plannedBefore = planned(start);
+  expect(start.rsvpEntries).toEqual([]);
 
   // Guest answers first (server moves ahead of the organizer's local copy).
   const guestCtx = await browser.newContext();
   const guest = await guestCtx.newPage();
   await guest.goto(url);
-  await guest.getByRole("button", { name: "maybe" }).first().click();
-  await expect(guest.getByRole("status")).toContainText("maybe");
+  await submitRsvp(guest, { name: "Srinivas Rao", party: 3, functions: ["s4"], answer: "maybe" });
   await guestCtx.close();
 
   // Organizer edits from the now-stale copy.
@@ -202,17 +200,18 @@ test("guest RSVP and an organizer budget edit made at the same time both survive
   const res = await request.get(`/api/events/${share.eventId}`, { headers: auth });
   expect(res.status()).toBe(200);
   const body = await res.json();
-  expect(maybes(body.plan)).toBeGreaterThan(maybesBefore);
+  expect((body.plan as ServerPlan).rsvpEntries.map(e => e.name)).toEqual(["Srinivas Rao"]);
   expect(body.version).toBeGreaterThan(share.version);
   expect(planned(body.plan)).toBe(plannedBefore - 30_000 * 100);
 });
 
 test("private sub-events stay off the public link until the organizer marks them public", async ({ page, browser }) => {
-  await page.getByRole("combobox", { name: "Event" }).selectOption("wedding");
+  await switchEvent(page, "wedding");
   await page.getByTestId("open-guest-links").click();
   await page.getByTestId("publish-guest-links").click();
-  await expect(page.getByTestId("visibility-summary")).toContainText("3 of 5 sub-events are public");
-  const publicUrl = await page.getByTestId("public-guest-link").inputValue();
+  // v8 Part 1d: the dialog hands out only the RSVP link; an old public itinerary URL is the same address without #k=.
+  const publicUrl = (await page.getByTestId("rsvp-guest-link").inputValue()).replace(/#.*$/, "");
+  expect(publicUrl).toMatch(/\/guest\/[A-Za-z0-9_-]+$/);
   await page.getByRole("button", { name: "Close", exact: true }).click();
 
   const guestCtx = await browser.newContext();

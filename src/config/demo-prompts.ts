@@ -54,8 +54,8 @@ const DEFINITIONS = [
 
   // Guest concierge.
   { id: "guest-sangeet-dress-code", requires: "sangeet", audience: "guest", eventTypes: ["wedding"], text: "What is the dress code and venue for Sangeet?", hint: "Guests can ask this" },
-  { id: "guest-rsvp-haldi", requires: "haldi", audience: "guest", eventTypes: ["wedding"], text: "RSVP yes for Anil Sharma to Haldi", hint: "Guests can ask this" },
-  { id: "guest-household-rsvp-jain", requires: "haldi", audience: "guest", eventTypes: ["wedding"], text: "Mark the Sharma household as attending Haldi and Reception with 2 Jain meals", hint: "Guests can ask this" },
+  { id: "guest-rsvp-haldi", requires: "haldi", audience: "guest", eventTypes: ["wedding"], text: "RSVP yes for me to Haldi", hint: "Guests can ask this" },
+  { id: "guest-household-rsvp-jain", requires: "haldi", audience: "guest", eventTypes: ["wedding"], text: "I'm attending Haldi and Reception, with a Jain meal", hint: "Guests can ask this" },
   { id: "guest-tries-budget-cut", audience: "guest", eventTypes: ["wedding"], text: "Cut ₹20k from decor", hint: "Guests can ask this" },
   { id: "guest-unclaimed-wishes", audience: "guest", eventTypes: ["birthday"], text: "Which birthday wishes are still unclaimed?", hint: "Guests can ask this" },
   { id: "guest-claim-polaroid", audience: "guest", eventTypes: ["birthday"], text: "Claim the Retro Polaroid Camera from the birthday wishlist.", hint: "Guests can ask this" },

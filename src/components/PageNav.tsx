@@ -1,13 +1,13 @@
 "use client";
 import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
-import { CalendarRange, Ellipsis, LayoutDashboard, Lightbulb, ListChecks, PartyPopper, Store, Wallet, type LucideIcon } from "lucide-react";
+import { CalendarRange, Contact, Ellipsis, LayoutDashboard, Lightbulb, ListChecks, PartyPopper, Store, Wallet, type LucideIcon } from "lucide-react";
 import { PAGES, type PageId } from "@/routes";
 
-const ICONS: Record<PageId, LucideIcon> = { overview: LayoutDashboard, budget: Wallet, vendors: Store, tasks: ListChecks, schedule: CalendarRange, event: PartyPopper, ideas: Lightbulb };
+const ICONS: Record<PageId, LucideIcon> = { overview: LayoutDashboard, budget: Wallet, vendors: Store, tasks: ListChecks, schedule: CalendarRange, event: PartyPopper, guests: Contact, ideas: Lightbulb };
 /** Below 768px the bar keeps four pages; the rest sit in a "More" sheet so every target stays 44px+ and labels never truncate. */
 export const BAR_PAGES: readonly PageId[] = ["overview", "budget", "tasks", "vendors"];
-export const MORE_PAGES: readonly PageId[] = ["schedule", "event", "ideas"];
+export const MORE_PAGES: readonly PageId[] = ["schedule", "event", "guests", "ideas"];
 
 /**
  * The organizer's page navigation. One variant is rendered at a time (PlannerApp picks by width), so each link exists

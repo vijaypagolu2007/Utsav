@@ -20,6 +20,12 @@ export type Store = {
   today?: string;
   /** Saved slots for templates this build doesn't know (raw, untouched), preserved across saves. */
   retired?: Record<string, unknown>;
+  /**
+   * v8 Part 0d: samples the organizer deleted on this device (template ids). Such a slot is not listed under Samples
+   * until "Restore samples" / "Load sample events" brings a fresh copy back, or an event of the organizer's own (or a
+   * restored one) takes the slot. Older builds ignore the field.
+   */
+  removedSamples?: TemplateId[];
 };
 
 /** A slot's starting point: a fresh copy of its template, never a shared reference. */
@@ -27,13 +33,13 @@ export const freshHistory = (id: TemplateId): History => ({ snaps: [{ plan: inst
 export const defaultStore = (): Store => ({ active: DEFAULT_TEMPLATE_ID, byType: { [DEFAULT_TEMPLATE_ID]: freshHistory(DEFAULT_TEMPLATE_ID) } });
 export const historyOf = (s: Store, id: TemplateId = s.active): History => s.byType[id] ?? freshHistory(id);
 
-export function serializeStore(s: Store): string {
+export function serializeStore(s: Store, maxSnapshots: number = MAX_SNAPSHOTS): string {
   const byType: Record<string, unknown> = { ...s.retired };
   for (const [t, h] of Object.entries(s.byType) as [TemplateId, History][]) {
-    const start = Math.max(0, h.snaps.length - MAX_SNAPSHOTS);
+    const start = Math.max(0, h.snaps.length - maxSnapshots);
     byType[t] = { snaps: h.snaps.slice(start), idx: Math.max(0, h.idx - start) };
   }
-  return JSON.stringify({ v: 1, active: s.active, byType, ...(s.today ? { today: s.today } : {}) });
+  return JSON.stringify({ v: 1, active: s.active, byType, ...(s.today ? { today: s.today } : {}), ...(s.removedSamples?.length ? { removedSamples: s.removedSamples } : {}) });
 }
 
 type RawHistory = { snaps?: { plan: unknown; label?: string }[]; idx?: number };
@@ -42,7 +48,7 @@ type RawHistory = { snaps?: { plan: unknown; label?: string }[]; idx?: number };
 export function parseStore(raw: string | null): Store {
   if (!raw) return defaultStore();
   try {
-    const j = JSON.parse(raw) as { v?: number; active?: string; today?: string; byType?: Record<string, RawHistory> };
+    const j = JSON.parse(raw) as { v?: number; active?: string; today?: string; byType?: Record<string, RawHistory>; removedSamples?: unknown };
     if (j.v !== 1 || !j.byType || typeof j.byType !== "object") return defaultStore();
     const out: Store = { active: DEFAULT_TEMPLATE_ID, byType: {} };
     for (const [key, h] of Object.entries(j.byType)) {
@@ -60,6 +66,10 @@ export function parseStore(raw: string | null): Store {
       if (snaps.length) out.byType[template.id as TemplateId] = { snaps, idx: Math.min(Math.max(0, Number(h.idx) || 0), snaps.length - 1) };
     }
     if (typeof j.today === "string" && /^\d{4}-\d{2}-\d{2}$/.test(j.today)) out.today = j.today;
+    if (Array.isArray(j.removedSamples)) {
+      const removed = TEMPLATES.map(t => t.id as TemplateId).filter(id => (j.removedSamples as unknown[]).includes(id));
+      if (removed.length) out.removedSamples = removed;
+    }
     out.active = isTemplateId(j.active) ? j.active : DEFAULT_TEMPLATE_ID;
     if (!out.byType[out.active]) out.byType[out.active] = freshHistory(out.active);
     return out;
@@ -93,7 +103,15 @@ export function markOnboarded(): void {
   try { window.localStorage.setItem(ONBOARDING_KEY, "done"); } catch { /* storage full or blocked: the welcome may show again */ }
 }
 
+/**
+ * Save the store. v8 Part 1: a big guest list (hundreds of imported households plus the change log) times 25 undo steps
+ * can pass the browser's ~5 MB localStorage quota, so a failed write retries with a shorter undo history (5, then 1
+ * step per event) instead of silently keeping nothing.
+ */
 export function saveStore(s: Store): boolean {
   if (typeof window === "undefined") return false;
-  try { window.localStorage.setItem(STORAGE_KEY, serializeStore(s)); return true; } catch { return false; }
+  for (const n of [MAX_SNAPSHOTS, 5, 1]) {
+    try { window.localStorage.setItem(STORAGE_KEY, serializeStore(s, n)); return true; } catch { /* quota: try a shorter history */ }
+  }
+  return false;
 }

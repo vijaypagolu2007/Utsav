@@ -2,9 +2,10 @@
 // It never mutates the live plan. It dry-runs batches and returns proposals; the client commits them through
 // applyBatch after the trust-tier check (Tier 0 auto, Tier 1 approve, Tier 2 human sends).
 import { z } from "zod";
-import { householdOf, visibleSubEventIds } from "./visibility";
+import { visibleSubEventIds } from "./visibility";
 import type { AgentState } from "./schema";
 import { applyBatch, Batch, type BatchInput, type Diagnostics, type Role, rupees, taskDueDate } from "./commands";
+import { ANSWER_LABEL, computeRsvpCounts, MEAL_LABEL, rsvpCountsForAi, rsvpFunctions } from "./rsvp";
 import { initializeEventPlan } from "./blueprint";
 import { computePlanDiff, type PlanDiff } from "./diff";
 import { computePlanInsights, type Insight } from "./insights";
@@ -72,7 +73,7 @@ export type AgentAction =
 
 export type ChatTurn = { role: "user" | "assistant"; text: string };
 export type ChatRequest = { messages: ChatTurn[]; state: AgentState; today: string; forceOffline?: boolean;
-  role?: Role; actingGuestId?: string | null };
+  role?: Role; actingEntryId?: string | null };
 /** Tools a guest-mode agent may call. apply_plan_changes is further limited to GUEST_ALLOWED_OPS by the reducer. */
 export const GUEST_TOOLS = new Set(["apply_plan_changes", "get_event_info"]);
 export type ChatResponse = { reply: string; actions: AgentAction[]; mode: "gemini" | "offline"; warning?: string };
@@ -87,13 +88,20 @@ const fmtCuttable = (d: Diagnostics) =>
  * Run one tool call against the working state. Returns what to send back to the model, the UI action
  * (if any), and the working state for any later call in the same turn (a dry-run assumes approval).
  */
-export function executeAgentTool(name: string, args: unknown, working: AgentState, today: string, role: Role = "organizer", ideaSource: "gemini" | "demo" = "gemini", opts: { refine?: Refine } = {}):
+/**
+ * v8 Part 1c: `opts.actingEntryId` is the RSVP entry the Co-Pilot speaks for in guest mode (Guest View). Its writes are
+ * scoped to that entry (the reducer refuses any other) and its view shows nobody else's RSVP.
+ */
+export function executeAgentTool(name: string, args: unknown, working: AgentState, today: string, role: Role = "organizer", ideaSource: "gemini" | "demo" = "gemini", opts: { refine?: Refine; actingEntryId?: string | null } = {}):
   { response: Record<string, unknown>; actions: AgentAction[]; working: AgentState } {
   if (role === "guest" && !GUEST_TOOLS.has(name))
     return { response: { ok: false, reason: `${name} isn't available in Guest mode` }, actions: [], working };
   switch (name) {
     case "get_event_info":
-      return { response: { info: summarizeForGuest(working, null) }, actions: [], working };
+      return { response: { info: summarizeForGuest(working, role === "guest" ? opts.actingEntryId ?? null : null) }, actions: [], working };
+    // v8 Part 1c: read-only headcounts, computed in code (src/rsvp.ts). Organizer only (not in GUEST_TOOLS). No names, no phones.
+    case "get_rsvp_counts":
+      return { response: rsvpCountsForAi(working), actions: [], working };
     case "get_plan_snapshot":
       return { response: { plan: summarizePlan(working, today) }, actions: [], working };
     case "get_plan_insights": {
@@ -104,7 +112,7 @@ export function executeAgentTool(name: string, args: unknown, working: AgentStat
     case "apply_plan_changes": {
       const parsed = Batch.safeParse(args);
       const batch = (parsed.success ? parsed.data : args) as BatchInput;
-      const r = applyBatch(working, args, { role });
+      const r = applyBatch(working, args, { role, ...(role === "guest" && opts.actingEntryId ? { actorEntryId: opts.actingEntryId } : {}) });
       if (r.ok) {
         const tier = agentBatchTier(Batch.parse(args).commands);
         const diff = computePlanDiff(working, r.state);
@@ -214,9 +222,21 @@ export function summarizePlan(st: AgentState, today: string): string {
   const checklist = checklistFor(st).map(s => `${s.key}${st.vendorChecklist.notNeeded.includes(s.key) ? "(not needed)" : ""}`);
   lines.push(`VENDOR CHECKLIST SLOTS: ${checklist.join(", ")}`);
   if (st.timeline.length) lines.push(`TIMELINE BLOCKS: ${st.timeline.map(b => `${b.id} ${b.label}@${b.subEventId} ${b.startMin}-${b.endMin}min lane ${b.lane}${b.anchored ? " ANCHORED" : ""}`).join(" | ")}`);
+  // Names and ids only: phones and emails are organizer-only and never go to the model (v8 Part 1).
+  if (st.households.length) lines.push(`HOUSEHOLDS (${st.households.length}; id "label" size): ${st.households.slice(0, 40).map(h => `${h.id} "${h.label}" ${st.guests.filter(g => g.householdId === h.id).length}`).join(" | ")}`);
   if (st.guests.length) lines.push(`GUESTS: ${st.guests.slice(0, 60).map(g => `${g.id} ${g.name}`).join(", ")}`);
+  // v8 Part 1c: the open RSVP list. Ids, names, party size and answer only (never phones); numbers come from get_rsvp_counts.
+  const c = computeRsvpCounts(st);
+  if (st.rsvpEntries.length) {
+    const live = st.rsvpEntries.filter(e => !e.removedAt && !e.mergedInto);
+    lines.push(`RSVP LIST (${c.totalEntries} live; call get_rsvp_counts for any headcount; settings: closes ${st.rsvpSettings.closesAt ?? "never"}, askKids ${st.rsvpSettings.askKids}): ${live.slice(0, 60).map(e => `${e.id} "${e.name}" ${e.partySize} ${e.answer}${e.vip ? " VIP" : ""}${e.possibleDuplicateOf ? ` DUP-OF ${e.possibleDuplicateOf}` : ""}`).join(" | ")}`);
+    const removed = st.rsvpEntries.filter(e => e.removedAt && !e.mergedInto);
+    if (removed.length) lines.push(`RSVPs REMOVED (restorable): ${removed.slice(0, 20).map(e => `${e.id} "${e.name}"`).join(" | ")}`);
+  } else lines.push(`RSVP LIST: empty (settings: closes ${st.rsvpSettings.closesAt ?? "never"}, askKids ${st.rsvpSettings.askKids})`);
+  const pendingJoins = st.joinRequests.filter(r => r.status === "pending");
+  if (pendingJoins.length) lines.push(`JOIN REQUESTS pending (id name size): ${pendingJoins.slice(0, 20).map(r => `${r.id} ${r.name} ${r.size}`).join(" | ")}`);
   const x = e.ext;
-  if (x.type === "wedding") lines.push(`WEDDING partners ${x.partners.join(" & ")}, traditions ${x.traditions.join(", ")}`);
+  if (x.type === "wedding") lines.push(`WEDDING partners ${x.partners.join(" & ")}, traditions ${x.traditions.join(", ")}; gift registry ${x.wishlist.map(w => `${w.id} ${w.item} (${w.claimedByGuestId ? "claimed" : "unclaimed"})`).join("; ") || "(empty)"}${x.wishlistSurprise ? "; surprise mode on" : ""}`);
   if (x.type === "birthday") lines.push(`BIRTHDAY ${x.honoree} turning ${x.turningAge ?? "?"}, theme ${x.theme}; wishlist ${x.wishlist.map(w => `${w.id} ${w.item} (${w.priority}${w.claimedByGuestId ? `, claimed by ${w.claimedByGuestId}` : ", unclaimed"})`).join("; ")}`);
   if (x.type === "community") {
     lines.push(`SPONSORS: ${x.sponsors.map(s => `${s.id} ${s.name} ${s.tier} ${s.status} pledged ${rupees(s.pledgedPaise)} received ${rupees(s.receivedPaise)}`).join(" | ")}`);
@@ -225,24 +245,27 @@ export function summarizePlan(st: AgentState, today: string): string {
   return lines.join("\n");
 }
 
-/** What a guest may see: schedule, venues, dress codes, RSVPs, wishlist, volunteer shifts. No money, no vendors. */
-export function summarizeForGuest(st: AgentState, actingGuestId: string | null): string {
+/**
+ * What a guest may see: schedule, venues, dress codes, their own RSVP, wishlist, volunteer shifts. No money, no vendors.
+ * v8 Part 1c: the acting guest is an RSVP entry (Guest View); only that entry's answers, never anybody else's.
+ */
+export function summarizeForGuest(st: AgentState, actingEntryId: string | null): string {
   const e = st.event;
   const wd = (d: string) => new Date(d + "T00:00:00Z").toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
   const hm = (m: number) => `${((Math.floor(m / 60) + 11) % 12) + 1}:${String(m % 60).padStart(2, "0")} ${m < 720 ? "AM" : "PM"}`;
   const lines = [`EVENT ${e.title} | ${e.eventType} | ${e.city} | ${e.startDate}..${e.endDate}`];
-  const visible = visibleSubEventIds(st, householdOf(st, actingGuestId));
+  // Guest View acts as someone holding the RSVP link: every sub-event that takes RSVPs, plus the public ones.
+  const fns = rsvpFunctions(st);
+  const visible = new Set([...visibleSubEventIds(st, []), ...fns.map(s => s.id)]);
   for (const s of [...st.subEvents].filter(s => visible.has(s.id)).sort((a, b) => a.date.localeCompare(b.date) || a.startMin - b.startMin)) {
     const blocks = st.timeline.filter(b => b.subEventId === s.id).sort((a, b) => a.startMin - b.startMin).map(b => `${hm(b.startMin)} ${b.label}`);
-    lines.push(`- ${s.slug}: ${s.name}, ${wd(s.date)} ${s.date} ${hm(s.startMin)}–${hm(s.endMin)}, venue ${s.venue || "tbc"}, dress code ${s.dressCode || "none"}${blocks.length ? `; schedule: ${blocks.join(", ")}` : ""}`);
+    lines.push(`- ${s.slug}: ${s.name}, ${wd(s.date)} ${s.date} ${hm(s.startMin)}–${hm(s.endMin)}, venue ${s.venue || "tbc"}, dress code ${s.dressCode || "none"}${s.collectsRsvp ? ", takes RSVPs" : ""}${blocks.length ? `; schedule: ${blocks.join(", ")}` : ""}`);
   }
-  for (const h of st.households) {
-    const gs = st.guests.filter(g => g.householdId === h.id);
-    if (gs.length) lines.push(`HOUSEHOLD ${h.id} "${h.label}": ${gs.map(g => `${g.id} ${g.name} [${Object.entries(g.rsvp).map(([sid, v]) => `${visible.has(sid) ? st.subEvents.find(x => x.id === sid)?.slug ?? sid : "private"}=${v}`).join(" ")}]${g.diet.length ? ` diet ${g.diet.join("/")}` : ""}`).join("; ")}`);
-  }
+  const me = actingEntryId ? st.rsvpEntries.find(r => r.id === actingEntryId && !r.removedAt && !r.mergedInto) : undefined;
+  if (me) lines.push(`YOUR RSVP ${me.id}: "${me.name}", ${me.partySize} people, ${ANSWER_LABEL[me.answer]}, functions ${me.functions.map(f => st.subEvents.find(s => s.id === f)?.slug ?? f).join(", ") || "none"}, meal ${MEAL_LABEL[me.meal]}`);
+  else lines.push("YOUR RSVP: not sent yet (the guest fills in the RSVP form first)");
   const x = e.ext;
-  if (x.type === "birthday") lines.push(`WISHLIST: ${x.wishlist.map(w => `${w.id} ${w.item} (${w.claimedByGuestId ? "claimed" : "unclaimed"})`).join("; ")}`);
+  if (x.type === "birthday" || x.type === "wedding") lines.push(`${x.type === "wedding" ? "GIFT REGISTRY" : "WISHLIST"}: ${x.wishlist.map(w => `${w.id} ${w.item} (${w.claimedByGuestId ? (me && w.claimedByGuestId === me.id ? "claimed by you" : "claimed") : "unclaimed"})`).join("; ")}`);
   if (x.type === "community") lines.push(`VOLUNTEERS signed up: ${x.volunteerSignups.length}; sponsor tiers: title, gold, silver, in_kind`);
-  if (actingGuestId) lines.push(`ACTING GUEST: ${actingGuestId} (${st.guests.find(g => g.id === actingGuestId)?.name ?? "unknown"})`);
   return lines.join("\n");
 }

@@ -3,12 +3,15 @@
 // merge is three-way: a guest-owned field takes the server value only if the server changed it since `base`,
 // so an organizer's own edit to the same field is never silently overwritten. Without `base` (first sync after
 // a reload with no stored base) the server copy wins for guest-owned fields.
-import type { AgentState } from "./schema";
+import { JOIN_RECORDS_CAP, RSVP_ENTRIES_CAP, RSVP_LOG_CAP, type AgentState, type RsvpEntry } from "./schema";
 
 type Rsvp = AgentState["guests"][number]["rsvp"];
 const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-/** Guest-writable fields: RSVP answers (not invitations), diets, wishlist claims, community sign-ups. */
+/**
+ * Guest-writable fields: RSVP answers (not invitations), diets, wishlist claims, community sign-ups, (v8) join requests
+ * and change-log entries, and (v8 Part 1c) the open RSVP list. RSVP settings (close date, kids question) are the organizer's.
+ */
 export function rebaseGuestFields(local: AgentState, remote: AgentState, base?: AgentState | null): AgentState {
   const rGuests = new Map(remote.guests.map(g => [g.id, g]));
   const bGuests = new Map((base?.guests ?? []).map(g => [g.id, g]));
@@ -30,9 +33,10 @@ export function rebaseGuestFields(local: AgentState, remote: AgentState, base?: 
 
   let ext = local.event.ext;
   const rx = remote.event.ext, bx = base?.event.ext;
-  if (ext.type === "birthday" && rx.type === "birthday") {
+  // Wishlist (birthday) and gift registry (wedding, v8 Part 1): claims and releases are guest-owned.
+  if ((ext.type === "birthday" || ext.type === "wedding") && rx.type === ext.type) {
     const rClaims = new Map(rx.wishlist.map(w => [w.id, w.claimedByGuestId]));
-    const bClaims = new Map(bx?.type === "birthday" ? bx.wishlist.map(w => [w.id, w.claimedByGuestId]) : []);
+    const bClaims = new Map(bx?.type === ext.type ? bx.wishlist.map(w => [w.id, w.claimedByGuestId]) : []);
     ext = { ...ext, wishlist: ext.wishlist.map(w => {
       if (!rClaims.has(w.id)) return w;
       const rc = rClaims.get(w.id)!;
@@ -67,7 +71,66 @@ export function rebaseGuestFields(local: AgentState, remote: AgentState, base?: 
     if (addVs.length || addSp.length)
       ext = { ...ext, volunteers: ext.volunteers + addVs.length, volunteerSignups: [...ext.volunteerSignups, ...addVs], sponsors: [...ext.sponsors, ...addSp] };
   }
-  return { ...local, guests, event: { ...local.event, ext } };
+  return { ...local, guests, event: { ...local.event, ext }, joinRequests: mergeJoinRequests(local, remote, base), rsvpLog: mergeLog(local, remote, base),
+    rsvpEntries: mergeRsvpEntries(local, remote, base) };
+}
+
+/** The fields a guest writes on the open RSVP form (plus the server's duplicate flag). */
+const GUEST_ENTRY_FIELDS = ["name", "phone", "partySize", "kids", "functions", "meal", "answer", "updatedAt"] as const;
+/**
+ * v8 Part 1c. RSVP entries arrive on the server (the open link); the organizer marks VIPs, removes and merges them locally.
+ *   • An entry only the server has is added (a new RSVP), unless `base` had it (the organizer's side dropped it: kept out).
+ *   • For an entry both sides have, the guest-owned fields take the server copy when the guest changed them since `base`
+ *     (compared by updatedAt; without a base, the server copy wins). vip, removedAt and mergedInto stay the organizer's.
+ *   • possibleDuplicateOf: the server sets it; the organizer clears it by merging or removing. The server value wins only
+ *     when it changed since `base` and the entry is still live here.
+ */
+function mergeRsvpEntries(local: AgentState, remote: AgentState, base?: AgentState | null): RsvpEntry[] {
+  const bMap = new Map((base?.rsvpEntries ?? []).map(e => [e.id, e]));
+  const lMap = new Map(local.rsvpEntries.map(e => [e.id, e]));
+  const rMap = new Map(remote.rsvpEntries.map(e => [e.id, e]));
+  let changed = false;
+  const out = local.rsvpEntries.map(l => {
+    const r = rMap.get(l.id);
+    if (!r) return l;
+    const b = base ? bMap.get(l.id) : undefined;
+    let next: RsvpEntry = l;
+    const guestChanged = base ? (r.updatedAt !== (b?.updatedAt ?? null)) : r.updatedAt !== l.updatedAt;
+    if (guestChanged && r.updatedAt >= l.updatedAt) {
+      const patch: Partial<RsvpEntry> = {};
+      for (const k of GUEST_ENTRY_FIELDS) (patch as Record<string, unknown>)[k] = r[k];
+      next = { ...next, ...patch };
+    }
+    const dupChanged = base ? r.possibleDuplicateOf !== (b?.possibleDuplicateOf ?? null) : r.possibleDuplicateOf !== l.possibleDuplicateOf;
+    if (dupChanged && !l.removedAt && !l.mergedInto && r.possibleDuplicateOf !== l.possibleDuplicateOf
+      && (r.possibleDuplicateOf === null || lMap.has(r.possibleDuplicateOf))) next = { ...next, possibleDuplicateOf: r.possibleDuplicateOf };
+    if (next !== l && !eq(next, l)) { changed = true; return next; }
+    return l;
+  });
+  const add = remote.rsvpEntries.filter(r => !lMap.has(r.id) && !bMap.has(r.id));
+  if (!add.length && !changed) return local.rsvpEntries;
+  return [...out, ...add].slice(0, RSVP_ENTRIES_CAP);
+}
+
+/**
+ * v8 Part 1. Join requests arrive on the server (the public join endpoint); the organizer decides them locally. A remote
+ * request the organizer has never seen is added; one the organizer already has keeps the organizer's status (approved or
+ * declined), so a decision is never undone by a sync. A request in `base` but gone locally was pruned by the cap: not re-added.
+ */
+function mergeJoinRequests(local: AgentState, remote: AgentState, base?: AgentState | null): AgentState["joinRequests"] {
+  const mine = new Set(local.joinRequests.map(r => r.id));
+  const known = new Set((base?.joinRequests ?? []).map(r => r.id));
+  const add = remote.joinRequests.filter(r => !mine.has(r.id) && !known.has(r.id) && r.status === "pending");
+  return add.length ? [...local.joinRequests, ...add].slice(-JOIN_RECORDS_CAP) : local.joinRequests;
+}
+
+/** v8 Part 1. The change log is append-only on both sides: union by id, oldest first, newest RSVP_LOG_CAP kept. */
+function mergeLog(local: AgentState, remote: AgentState, base?: AgentState | null): AgentState["rsvpLog"] {
+  const mine = new Set(local.rsvpLog.map(e => e.id));
+  const known = new Set((base?.rsvpLog ?? []).map(e => e.id));
+  const add = remote.rsvpLog.filter(e => !mine.has(e.id) && !known.has(e.id));
+  if (!add.length) return local.rsvpLog;
+  return [...local.rsvpLog, ...add].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)).slice(-RSVP_LOG_CAP);
 }
 
 /** True when the remote copy carries guest-side changes the local plan lacks. */
