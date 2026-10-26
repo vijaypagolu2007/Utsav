@@ -2,6 +2,7 @@
 import type { EventPlan } from "./schema";
 import { rupees, taskDueDate } from "./commands";
 import { maskPhone } from "./phone";
+import { computeRunSheetTimes, formatClock, parseHHMM } from "./run-sheet";
 
 /** Above this many new or removed people, the card shows one summary row instead of a row each (a 300-guest import). */
 export const DIFF_LIST_MAX = 12;
@@ -10,7 +11,9 @@ export type DiffRow = {
   kind: "budget" | "budget_new" | "quote" | "vendor" | "diet" | "signup" | "sub_event" | "task_due" | "task_status" | "block" | "payment" | "rsvp" | "lock" | "wishlist" | "permit" | "sponsor" | "event"
     | "budget_removed" | "task_new" | "idea" | "basics" | "priorities" | "vendor_stage" | "checklist" | "task_dep"
     // v8 Part 1: people on the guest list, households, group join requests, and gifts added / edited / removed.
-    | "guest" | "household" | "join" | "gift";
+    | "guest" | "household" | "join" | "gift"
+    // v8 Part 1e: birthday run-sheet rows added / edited / moved / removed, and the party start time.
+    | "activity";
   id: string;
   label: string;
   before: string;
@@ -154,6 +157,7 @@ export function computePlanDiff(before: EventPlan, after: EventPlan): PlanDiff {
     for (const o of eb.wishlist) if (!ea.wishlist.some(x => x.id === o.id)) rows.push({ kind: "gift", id: o.id, label: `${o.item} (removed)`, before: o.claimedByGuestId ? "claimed" : "unclaimed", after: "—" });
     if (ea.wishlistSurprise !== eb.wishlistSurprise) rows.push({ kind: "gift", id: "wishlist-surprise", label: "Surprise mode", before: eb.wishlistSurprise ? "on" : "off", after: ea.wishlistSurprise ? "on" : "off" });
   }
+  if (ea.type === "birthday" && eb.type === "birthday") activityRows(eb, ea, rows);
   if (ea.type === "community" && eb.type === "community") {
     for (const p of ea.permits) {
       const o = eb.permits.find(x => x.id === p.id);
@@ -214,5 +218,38 @@ function guestRows(before: EventPlan, after: EventPlan, rows: DiffRow[]) {
     const o = before.joinRequests.find(x => x.id === r.id);
     if (!o) rows.push({ kind: "join", id: r.id, label: `Join request: ${r.name}`, before: "—", after: `pending · ${r.size}` });
     else if (o.status !== r.status) rows.push({ kind: "join", id: r.id, label: `Join request: ${r.name} (${r.size})`, before: o.status, after: r.status === "approved" ? `approved · household ${hhLabel(r.householdId ?? "")}` : r.status });
+  }
+}
+
+type BirthdayExt = Extract<EventPlan["event"]["ext"], { type: "birthday" }>;
+/**
+ * The rows whose single move turns `before` into `after` (same ids, different order). One id for a long move; both for an
+ * adjacent swap (either reading is true); empty when more than one row moved, and then every shifted row is listed.
+ */
+function movedRows(before: string[], after: string[]): Set<string> {
+  return new Set(after.filter(id => after.filter(x => x !== id).join("|") === before.filter(x => x !== id).join("|")));
+}
+/** v8 Part 1e: the party run-sheet. Times come from run-sheet.ts (code), never from the model. */
+function activityRows(eb: BirthdayExt, ea: BirthdayExt, rows: DiffRow[]) {
+  const desc = (a: BirthdayExt["activities"][number]) =>
+    `${a.durationMin} min · ${a.ageRange ? `ages ${a.ageRange[0]}–${a.ageRange[1]}` : "all ages"}${a.supplies.length ? ` · ${a.supplies.join(", ")}` : ""}`;
+  const tA = computeRunSheetTimes(ea.partyStart, ea.activities);
+  const at = (k: number) => `row ${k + 1}${tA ? ` · ${tA[k]!.label}` : ""}`;
+  const idsB = eb.activities.map(a => a.id), idsA = ea.activities.map(a => a.id);
+  const sameSet = idsA.length === idsB.length && idsA.every(id => idsB.includes(id));
+  const moved = sameSet && idsA.join("|") !== idsB.join("|") ? movedRows(idsB, idsA) : new Set<string>();
+  ea.activities.forEach((a, k) => {
+    const o = eb.activities.find(x => x.id === a.id);
+    if (!o) { rows.push({ kind: "activity", id: a.id, label: `${a.name} (new activity)`, before: "—", after: `${at(k)} · ${desc(a)}` }); return; }
+    const was = idsB.indexOf(a.id);
+    const edited = o.name !== a.name || desc(o) !== desc(a);
+    const shifted = sameSet && was !== k && (moved.size === 0 || moved.has(a.id));
+    if (edited || shifted) rows.push({ kind: "activity", id: a.id, label: a.name,
+      before: `${shifted ? `row ${was + 1} · ` : ""}${o.name !== a.name ? `${o.name} · ` : ""}${desc(o)}`, after: `${shifted ? `${at(k)} · ` : ""}${desc(a)}` });
+  });
+  for (const o of eb.activities) if (!idsA.includes(o.id)) rows.push({ kind: "activity", id: o.id, label: `${o.name} (removed)`, before: desc(o), after: "—" });
+  if (eb.partyStart !== ea.partyStart) {
+    const clock = (v: string | null) => { const m = parseHHMM(v); return m === null ? "not set" : formatClock(m); };
+    rows.push({ kind: "activity", id: "party-start", label: "Party starts at", before: clock(eb.partyStart), after: clock(ea.partyStart) });
   }
 }

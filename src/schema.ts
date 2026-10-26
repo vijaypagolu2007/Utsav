@@ -56,6 +56,11 @@ const BirthdayExt = z.looseObject({
     id: Id, name: z.string(), ageRange: z.tuple([z.number(), z.number()]).optional(),
     durationMin: z.number().int().positive(), supplies: z.array(z.string()).default([]),
   })).default([]),
+  /**
+   * v8 Part 1e: when the party starts, 24-hour "HH:MM" (local time at the venue). Each run-sheet row's start and end are
+   * computed from it in code (run-sheet.ts). Default null, so birthdays saved before it still parse and show durations only.
+   */
+  partyStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullable().default(null),
 });
 const CommunityExt = z.looseObject({
   type: z.literal("community"),
@@ -310,6 +315,8 @@ export const Idea = z.looseObject({
   /** What adopt_idea created from it (task and/or budget line ids). */
   adoptedTaskId: Id.nullable().default(null),
   adoptedBudgetItemId: Id.nullable().default(null),
+  /** v8 Part 1e: the birthday run-sheet row adopt_idea added for an activity idea. */
+  adoptedActivityId: Id.nullable().optional(),
   /** v6: set on a refinement ("cheaper alternative", "kid-friendly", "more traditional"): the idea it came from. */
   refinedFrom: Id.nullable().default(null),
 });

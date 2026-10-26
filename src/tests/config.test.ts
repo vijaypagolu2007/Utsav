@@ -12,7 +12,7 @@ import {
 import { DEMO_PROMPTS, DemoPrompt, DemoPromptList, promptsFor } from "../config/demo-prompts";
 import { KPI_DEFINITIONS, KpiDefinitionList, kpisFor, kpiTestId } from "../config/kpis";
 import {
-  DIET_OPTIONS, GUEST_RSVP_ANSWERS, PERMIT_STATUS_OPTIONS, RSVP_CYCLE, RSVP_LABELS, RSVP_STATUS_OPTIONS, SPONSOR_STATUS_OPTIONS,
+  DIET_OPTIONS, GUEST_RSVP_ANSWERS, PERMIT_STATUS_OPTIONS, RSVP_LABELS, RSVP_STATUS_OPTIONS, SPONSOR_STATUS_OPTIONS,
   SPONSOR_TIER_OPTIONS, TASK_COLUMN_ORDER, TASK_NEXT_STATUS, TASK_STATUS_OPTIONS, VOLUNTEER_SHIFTS, labelOf,
 } from "../config/planner-options";
 import { KPI_CALCULATORS, kpiContext, kpiValue } from "../kpis";
@@ -67,6 +67,7 @@ describe("event template registry", () => {
       ["invalid seed", d => { d[0]!.seed = { event: { title: "x" } }; }, /seed/],
       ["section for another type", d => { (d[0]!.layout as { columns: string[][] }).columns = [["permit-tracker"]]; }, /needs community/],
       ["unknown section", d => { (d[0]!.layout as { columns: string[][] }).columns = [["custom-html"]]; }, /columns/],
+      ["removed section (v8 Part 1f)", d => { (d[0]!.layout as { columns: string[][] }).columns = [["rsvp-matrix"], ["diet-summary"]]; }, /columns/],
       ["unknown guest section", d => { (d[2]!.guest as { footer: string[] }).footer = ["guest-wishlist"]; }, /needs birthday/],
       ["unknown token", d => { (d[0]!.layout as { heading: string }).heading = "Hi {process}"; }, /unknown \{token\}/],
       ["unknown key (e.g. code)", d => { d[0]!.render = "() => alert(1)"; }, /render|Unrecognized/i],
@@ -260,7 +261,6 @@ describe("planner option lists", () => {
     assert.ok(!PermitStatus.options.includes("committed" as never));
     assert.ok(GUEST_RSVP_ANSWERS.every(a => RsvpStatus.options.includes(a)));
     assert.ok(!(GUEST_RSVP_ANSWERS as readonly string[]).includes("invited"), "a guest can't answer 'invited'");
-    for (const [from, to] of Object.entries(RSVP_CYCLE)) assert.ok(RsvpStatus.options.includes(from as never) && RsvpStatus.options.includes(to));
     for (const to of Object.values(TASK_NEXT_STATUS)) assert.ok(TaskStatus.options.includes(to));
   });
 
@@ -357,12 +357,23 @@ describe("generic event-type layout", () => {
       assert.ok(req === "any" || (req as readonly string[]).every(t => EventType.options.includes(t as never)), id);
   });
 
-  test("wedding: RSVP matrix, couple profile and diet counts; nothing from other event types", () => {
+  test("wedding: couple profile, diet counts and gift registry, with a link to manage RSVPs on Guests; nothing from other event types", () => {
     const h = organizerHtml("wedding");
-    assert.match(h, /Wedding · RSVP Matrix &amp; Traditions/);
-    for (const s of ["Household · guest", "Arjun &amp; Meera", "RSVP deadline", "Dietary counts · Muhurtham (yes)"]) assert.ok(h.includes(s), s);
-    for (const s of ["Gift wishlist", "Sponsor pipeline", "Municipal permits"]) assert.ok(!h.includes(s), s);
-    assert.match(h, /xl:grid-cols-\[1fr_16rem\]/);
+    assert.match(h, /Wedding · Couple &amp; Traditions/);
+    for (const s of ["Arjun &amp; Meera", "RSVP deadline", "Dietary counts · Muhurtham (yes)", "Gift registry"]) assert.ok(h.includes(s), s);
+    // v8 Part 1f: no RSVP matrix on the Event page; one link to the Guests page instead.
+    for (const s of ["RSVP Matrix", "Household · guest", "RSVP totals", "Gift wishlist", "Sponsor pipeline", "Municipal permits"]) assert.ok(!h.includes(s), s);
+    assert.match(h, /<a [^>]*href="\/guests"[^>]*>Manage RSVPs on Guests<\/a>/);
+    assert.equal(h.split("Manage RSVPs on Guests").length - 1, 1, "one link");
+    assert.match(h, /@3xl:grid-cols-2/);
+    const layout = getTemplate("wedding")!.layout;
+    assert.deepEqual(layout.columns, [["couple-profile", "diet-summary"], ["wishlist-manager"]]);
+    assert.equal(layout.arrangement, "two-up");
+  });
+
+  test("v8 Part 1f: rsvp-matrix is no longer a section id and no template lists it", () => {
+    assert.ok(!Object.keys(ORGANIZER_SECTIONS).includes("rsvp-matrix"));
+    for (const t of TEMPLATES) assert.ok(!(t.layout.columns as readonly (readonly string[])[]).flat().includes("rsvp-matrix"), t.id);
   });
 
   test("birthday: heading from tokens, wishlist manager and activity run-sheet", () => {
@@ -382,7 +393,8 @@ describe("generic event-type layout", () => {
     const h = renderToStaticMarkup(createElement(ArchetypeCard, { template: getTemplate("community")!, plan: royalWedding, today: TODAY, commit: noop, highlight: hl, onAsk: () => {} }));
     assert.ok(!h.includes("Sponsor pipeline") && !h.includes("Municipal permits"));
     const empty = AgentState.parse({ ...royalWedding, guests: [], households: [] });
-    assert.ok(organizerHtml("wedding", empty).includes("No guests yet. The plan is sized for 300 guests."));
+    const w = organizerHtml("wedding", empty);
+    assert.ok(w.includes("No confirmations yet.") && w.includes("Manage RSVPs on Guests"));
   });
 
   test("guest microsite: kicker, tagline and cards come from the template; no organizer data", () => {

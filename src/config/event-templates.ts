@@ -20,7 +20,6 @@ import { arcadeBirthday, culturalFest, royalWedding } from "../presets";
  * adding a new id here without its component is a type error there.
  */
 export const ORGANIZER_SECTIONS = {
-  "rsvp-matrix": "any",
   "couple-profile": ["wedding"],
   "diet-summary": "any",
   "wishlist-manager": ["birthday", "wedding"],
@@ -133,8 +132,9 @@ export const TemplateRegistry = z.array(EventTemplate).min(1).superRefine((list,
 
 // ---------------------------------------------------------------- the registry
 const WEDDING_LAYOUT = {
-  heading: "Wedding · RSVP Matrix & Traditions", icon: "heart", arrangement: "main-aside",
-  columns: [["rsvp-matrix"], ["couple-profile", "diet-summary", "wishlist-manager"]],
+  // v8 Part 1f: the RSVP matrix is gone; RSVPs are collected by the RSVP link and managed on the Guests page.
+  heading: "Wedding · Couple & Traditions", icon: "heart", arrangement: "two-up",
+  columns: [["couple-profile", "diet-summary"], ["wishlist-manager"]],
 } as const;
 const BIRTHDAY_LAYOUT = {
   heading: "Birthday · {honoree}[ turns {turningAge}] · {theme}", icon: "cake", arrangement: "two-up",
@@ -153,7 +153,7 @@ const COMMUNITY_LAYOUT = {
 const DEFINITIONS = [
   {
     id: "wedding", name: "Royal Wedding", eventType: "wedding", accent: "rose",
-    description: "Five-day Telugu wedding in Hyderabad: Haldi to Reception, 300 guests, an RSVP matrix and vendor deposits.",
+    description: "Five-day Telugu wedding in Hyderabad: Haldi to Reception, 300 guests, a gift registry and vendor deposits.",
     seed: royalWedding, layout: WEDDING_LAYOUT,
     guest: { kicker: "You're invited to celebrate", tagline: "[{partners}]", aside: ["guest-rsvp", "guest-wishlist"], footer: [] },
   },

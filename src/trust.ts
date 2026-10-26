@@ -1,6 +1,6 @@
 // 3-tier trust model. Tier 0 auto-applies, Tier 1 needs a dry-run diff approval, Tier 2 is an outbound draft
 // that a human sends. The tier is decided deterministically from the commands, never by the LLM.
-import { GUEST_LIST_OPS, RSVP_ORGANIZER_OPS, V6_OPS, type Command } from "./commands";
+import { ACTIVITY_OPS, GUEST_LIST_OPS, RSVP_ORGANIZER_OPS, V6_OPS, type Command } from "./commands";
 
 export type TrustTier = 0 | 1 | 2;
 /** Budget moves at or above this need approval: ₹25,000. */
@@ -44,6 +44,10 @@ export function commandTier(c: Command): TrustTier {
     // merging two, and changing the close date or the form (which every guest sees) show a dry-run card first.
     case "submit_rsvp_entry": case "set_rsvp_vip": case "restore_rsvp_entry": return 0;
     case "remove_rsvp_entry": case "merge_rsvp_entries": case "set_rsvp_settings": return 1;
+    // v8 Part 1e: the party run-sheet. Adding, editing, reordering and the start time are undoable (Tier 0); removing a
+    // row shows a dry-run card first. The AI's proposals still always come as a card (agentBatchTier).
+    case "add_activity": case "update_activity": case "move_activity": case "set_party_start": return 0;
+    case "remove_activity": return 1;
     case "set_task_status": case "set_rsvp": case "shift_block": case "set_item_lock":
     case "claim_wishlist_item": case "set_permit_status":
       return 0;
@@ -57,11 +61,11 @@ export function batchTier(commands: Command[]): TrustTier {
 
 /**
  * The tier an AI proposal is shown at. Same as batchTier, except that a batch with any v6 op (priorities, vendors,
- * dependencies), a v8 guest-list / wishlist op or a v8 Part 1c RSVP-list op is never auto-applied for the AI: the organiser approves it on a card, even when its own tier is 0.
+ * dependencies), a v8 guest-list / wishlist op, a v8 Part 1c RSVP-list op or a v8 Part 1e run-sheet op is never auto-applied for the AI: the organiser approves it on a card, even when its own tier is 0.
  */
 export function agentBatchTier(commands: Command[]): TrustTier {
   const t = batchTier(commands);
-  return commands.some(c => V6_OPS.has(c.op) || GUEST_LIST_OPS.has(c.op) || RSVP_ORGANIZER_OPS.has(c.op)) ? (Math.max(1, t) as TrustTier) : t;
+  return commands.some(c => V6_OPS.has(c.op) || GUEST_LIST_OPS.has(c.op) || RSVP_ORGANIZER_OPS.has(c.op) || ACTIVITY_OPS.has(c.op)) ? (Math.max(1, t) as TrustTier) : t;
 }
 
 export const TIER_LABEL: Record<TrustTier, string> = {

@@ -22,6 +22,8 @@ export type PlannerState = {
   busy: boolean;
   /** Every dashboard edit goes through here: the deterministic reducer, under the current role, source "ui". */
   commit: Commit;
+  /** v8 Part 1e: the same, with an Undo button on its toast for 10 s (used when removing a run-sheet row). */
+  commitUndoable: Commit;
   /** Pulse these ids for three seconds (the "what just changed" highlight). */
   flash: (ids: string[]) => void;
   /** "Show me" for a red flag: go to the page that owns it, highlight it and move focus to it. */

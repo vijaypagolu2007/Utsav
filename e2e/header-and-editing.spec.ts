@@ -274,17 +274,15 @@ test("event name, couple, task title, sub-event name and start time, guest and h
   await page.keyboard.press("Enter");
   await expect(page.locator("#schedule")).toContainText("11:00 AM–2:00 PM"); // 10:00–13:00 moved, duration kept
 
-  // The RSVP section is on the Event page. It is full width there, so at this desktop size it renders as the matrix;
-  // below 600px of card width it is one collapsible card per household, and then the two we edit are opened first.
-  await openPage(page, "Event");
-  for (const h of ["Rao family", "Sharma family"]) {
-    const summary = page.locator("#event summary", { hasText: h });
-    if (await summary.count()) await summary.click();
-  }
+  // v8 Part 1f: the Event page no longer has an RSVP matrix; guest and household names are edited on the Guests page,
+  // in the optional household list (collapsed by default).
+  await openPageNav(page, "Guests");
+  const list = page.getByTestId("guests-optional");
+  if (!(await list.evaluate(el => (el as HTMLDetailsElement).open))) await list.locator("summary").click();
   await edit(page, "guest name Srinivas Rao", "Srinivas K. Rao");
-  await expect(page.locator("#event")).toContainText("Srinivas K. Rao");
+  await expect(page.getByTestId("household-list")).toContainText("Srinivas K. Rao");
   await edit(page, "household name Sharma family", "Sharma-Verma family");
-  await expect(page.locator("#event")).toContainText("Sharma-Verma family");
+  await expect(page.getByTestId("household-list")).toContainText("Sharma-Verma family");
 });
 
 test("inline editing at 375px: 44px targets, editor fits the screen, axe clean while editing", async ({ page }) => {

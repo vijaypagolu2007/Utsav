@@ -381,6 +381,10 @@ export function runOfflineAgent(st: AgentState, text: string, today: string): Ch
   const guestList = runOfflineGuestList(st, t, today);
   if (guestList) return guestList;
 
+  // v8 Part 1e: the birthday party run-sheet ("add a 20 minute treasure hunt after cake", "the party starts at 7 pm").
+  const runSheet = runOfflineRunSheet(st, t, today);
+  if (runSheet) return runSheet;
+
   // Ideas and advice: "give me sangeet ideas", "eco-friendly return gift ideas under ₹50k"
   if (/\b(ideas?|inspiration|suggestions?|suggest)\b/i.test(t) && !/\b(switch to|plan an?|create an?|set up an?)\b/i.test(t)) {
     const focus = t.replace(/\b(give|show|get|me|some|more|please|any|ideas?|suggestions?|suggest|inspiration|for|the|our|my)\b/gi, " ").replace(/\s+/g, " ").trim();
@@ -574,6 +578,57 @@ function runOfflineGuestList(st: AgentState, t: string, today: string): ChatResp
     return { mode: "offline", actions, reply: res.ok ? `${(res.log ?? []).join(". ").replace(/^Imported/, "Ready to import")}.${skipped} Approve the card to add them; each household gets its own private RSVP link.` : `I couldn't import those: ${res.reason}.${skipped}` };
   }
   return null;
+}
+
+// ---------- v8 Part 1e: the party activity run-sheet (offline, deterministic) ----------
+/** "add a 20 minute treasure hunt after cake", "add activity: musical chairs for 15 min before the magic show". */
+export const ADD_ACTIVITY_RE = /^\s*(?:please\s+)?add\s+(?:an?\s+)?(?:(\d{1,3})[\s-]*(?:min(?:ute)?s?)\s+(?:long\s+)?)?(?:(?:party\s+)?activity\s*[:\-–]?\s*)?(.+?)(?:\s+(?:for|of)\s+(\d{1,3})[\s-]*(?:min(?:ute)?s?))?(?:\s+(after|before)\s+(?:the\s+)?(.+?))?(?:\s+(?:to|on)\s+the\s+(?:run[- ]?sheet|activities|activity list|party))?[\s.!]*$/i;
+/** "the party starts at 7 pm", "set the party start to 19:30", "party start time 6:30pm". */
+export const PARTY_START_RE = /\bparty\s+(?:starts?|begins?|start\s+time)\s*(?:at|to|is|:)?\s*(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?(?=\s|[.!?]|$)/i;
+
+/** "7", "30", "pm" → "19:30"; null when the hour is ambiguous (no am/pm, 1–12) or not a time. Code converts, never the model. */
+export function clockToHHMM(hRaw: string, mRaw: string | undefined, ap: string | undefined): string | null {
+  const h = Number(hRaw), m = mRaw === undefined ? 0 : Number(mRaw);
+  if (!Number.isInteger(h) || m > 59) return null;
+  let hh: number;
+  if (ap) { if (h < 1 || h > 12) return null; const pm = /^p/i.test(ap); hh = (h % 12) + (pm ? 12 : 0); }
+  else if ((h >= 13 && h <= 23) || (h === 0) || hRaw.length === 2 && hRaw.startsWith("0")) hh = h;
+  else return null;
+  return `${String(hh).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function runOfflineRunSheet(st: AgentState, t: string, today: string): ChatResponse | null {
+  const x = st.event.ext;
+  if (x.type !== "birthday") return null;
+  const actions: AgentAction[] = [];
+  const start = PARTY_START_RE.exec(t);
+  if (start) {
+    const time = clockToHHMM(start[1]!, start[2], start[3]);
+    if (!time) return { mode: "offline", actions, reply: "What time does the party start? Say it with am or pm (\"7 pm\") or as 24-hour time (\"19:00\")." };
+    const r = executeAgentTool("apply_plan_changes", { summary: "Set the party start time", commands: [{ op: "set_party_start", time }] }, st, today);
+    actions.push(...r.actions);
+    const res = r.response as { ok: boolean; reason?: string; log?: string[] };
+    return { mode: "offline", actions, reply: res.ok ? `${(res.log ?? []).join(". ")}. Approve the card to set it; every row's time is worked out from it.` : `I couldn't set that: ${res.reason}` };
+  }
+  const m = ADD_ACTIVITY_RE.exec(t);
+  if (!m) return null;
+  const minutes = m[1] ?? m[3];
+  if (!minutes && !/\b(activit|run[- ]?sheet)/i.test(t)) return null;
+  const name = m[2]!.replace(/^(?:a|an|the)\s+/i, "").replace(/\s+/g, " ").trim();
+  if (!name || /^to\s/i.test(name)) return null;
+  if (!minutes) return { mode: "offline", actions, reply: `How long should "${name}" run? For example: "add a 20 minute ${name.toLowerCase()}".` };
+  let anchor: { afterId?: string; position?: number } = {};
+  if (m[4] && m[5]) {
+    const want = words(m[5]);
+    const hit = x.activities.map((a, k) => ({ a, k, score: [...words(a.name)].filter(w => want.has(w)).length })).sort((p, q) => q.score - p.score || p.k - q.k)[0];
+    if (!hit || hit.score === 0) return { mode: "offline", actions, reply: `Which activity should it go ${m[4].toLowerCase()}? The run-sheet has ${x.activities.map(a => a.name).join(", ") || "nothing yet"}.` };
+    anchor = m[4].toLowerCase() === "after" ? { afterId: hit.a.id } : { position: hit.k };
+  }
+  const cmd = { op: "add_activity" as const, name: name.charAt(0).toUpperCase() + name.slice(1), durationMin: Number(minutes), ...anchor };
+  const r = executeAgentTool("apply_plan_changes", { summary: `Add "${cmd.name}" to the run-sheet`, commands: [cmd] }, st, today);
+  actions.push(...r.actions);
+  const res = r.response as { ok: boolean; reason?: string; log?: string[] };
+  return { mode: "offline", actions, reply: res.ok ? `${(res.log ?? []).join(". ").replace(/^Added/, "Ready to add")}. Approve the card to add it.` : `I couldn't add that activity: ${res.reason}` };
 }
 
 // ---------- v8 Part 1c: RSVP headcounts and the organizer's RSVP settings (offline) ----------

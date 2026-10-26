@@ -4,7 +4,8 @@
 import { z } from "zod";
 import { visibleSubEventIds } from "./visibility";
 import type { AgentState } from "./schema";
-import { applyBatch, Batch, type BatchInput, type Diagnostics, type Role, rupees, taskDueDate } from "./commands";
+import { ACTIVITY_LIMITS, applyBatch, Batch, type BatchInput, type Diagnostics, type Role, rupees, taskDueDate } from "./commands";
+import { computeRunSheetTimes, runSheetEnd, runSheetTotal } from "./run-sheet";
 import { ANSWER_LABEL, computeRsvpCounts, MEAL_LABEL, rsvpCountsForAi, rsvpFunctions } from "./rsvp";
 import { initializeEventPlan } from "./blueprint";
 import { computePlanDiff, type PlanDiff } from "./diff";
@@ -238,6 +239,11 @@ export function summarizePlan(st: AgentState, today: string): string {
   const x = e.ext;
   if (x.type === "wedding") lines.push(`WEDDING partners ${x.partners.join(" & ")}, traditions ${x.traditions.join(", ")}; gift registry ${x.wishlist.map(w => `${w.id} ${w.item} (${w.claimedByGuestId ? "claimed" : "unclaimed"})`).join("; ") || "(empty)"}${x.wishlistSurprise ? "; surprise mode on" : ""}`);
   if (x.type === "birthday") lines.push(`BIRTHDAY ${x.honoree} turning ${x.turningAge ?? "?"}, theme ${x.theme}; wishlist ${x.wishlist.map(w => `${w.id} ${w.item} (${w.priority}${w.claimedByGuestId ? `, claimed by ${w.claimedByGuestId}` : ", unclaimed"})`).join("; ")}`);
+  if (x.type === "birthday") {
+    // v8 Part 1e: the run-sheet with times computed by code (run-sheet.ts); the model quotes them, never works them out.
+    const times = computeRunSheetTimes(x.partyStart, x.activities);
+    lines.push(`RUN-SHEET (${x.activities.length}/${ACTIVITY_LIMITS.maxActivities} rows, total ${runSheetTotal(x.activities)} min, party start ${x.partyStart ?? "not set"}${times ? `, ends ${runSheetEnd(x.partyStart, x.activities)}` : ""}; #index id "name" minutes ages${times ? " time" : ""}): ${x.activities.map((a, k) => `#${k} ${a.id} "${a.name}" ${a.durationMin}min ${a.ageRange ? `${a.ageRange[0]}-${a.ageRange[1]}` : "all"}${times ? ` ${times[k]!.label}` : ""}`).join(" | ") || "(empty)"}`);
+  }
   if (x.type === "community") {
     lines.push(`SPONSORS: ${x.sponsors.map(s => `${s.id} ${s.name} ${s.tier} ${s.status} pledged ${rupees(s.pledgedPaise)} received ${rupees(s.receivedPaise)}`).join(" | ")}`);
     lines.push(`PERMITS: ${x.permits.map(p => `${p.id} ${p.authority} ${p.kind} ${p.status} applyBy ${p.applyBy ?? "-"}`).join(" | ")}`);

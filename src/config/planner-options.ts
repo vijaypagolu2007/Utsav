@@ -16,8 +16,6 @@ export const RSVP_STATUS_OPTIONS = options(RsvpStatus.options, RSVP_LABELS);
 /** The answers a guest can give, in the order the RSVP buttons show them. "invited" is not an answer. */
 export const GUEST_RSVP_ANSWERS = ["yes", "maybe", "no"] as const satisfies readonly RsvpStatus[];
 export type GuestRsvpAnswer = (typeof GUEST_RSVP_ANSWERS)[number];
-/** Organizer RSVP matrix: one click advances to the next state. */
-export const RSVP_CYCLE: Readonly<Record<RsvpStatus, RsvpStatus>> = { invited: "yes", yes: "no", no: "maybe", maybe: "invited" };
 
 // ---------- Dietary needs ----------
 /**

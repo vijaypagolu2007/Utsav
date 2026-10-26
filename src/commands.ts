@@ -5,6 +5,7 @@ import { AgentState, BudgetItem, ExperienceLevel, IdeaKind, IsoDate, MinuteOfDay
 import { normalizePhone } from "./phone";
 import { ANSWER_LABEL, istToUtcIso, MEAL_LABEL, RSVP_CLOSED_MESSAGE, RSVP_ENTRY_ID, RSVP_REMOVED_MESSAGE, rsvpClosed, rsvpFunctions, formatIst } from "./rsvp";
 import { slotByKey } from "./config/vendor-checklist";
+import { computeRunSheetTimes, formatClock, parseHHMM, runSheetEnd, RUN_SHEET_INPUT } from "./run-sheet";
 import { isDefaultPriorities, planPriorityCut, spreadOverSlack } from "./priorities";
 
 const Ref = z.string().min(1).describe("An id, or a sub-event slug/name such as 'haldi'");
@@ -452,6 +453,56 @@ export const SetRsvpSettings = z.object({
 /** v8 Part 1c organizer ops on the RSVP list: never run for a guest, and an AI proposal with one is always an approval card. */
 export const RSVP_ORGANIZER_OPS: ReadonlySet<string> = new Set(["set_rsvp_vip", "remove_rsvp_entry", "restore_rsvp_entry", "merge_rsvp_entries", "set_rsvp_settings"]);
 
+// ---------- v8 Part 1e: the birthday party activity run-sheet ----------
+/** Limits that keep the run-sheet readable on a phone and on one approval card. */
+export const ACTIVITY_LIMITS = { maxActivities: 30, nameMax: 80, ...RUN_SHEET_INPUT, maxSupplies: 10, supplyMax: 40 } as const;
+const ActivityName = z.string().trim().min(1, "Name the activity").max(ACTIVITY_LIMITS.nameMax, `Keep the name under ${ACTIVITY_LIMITS.nameMax} characters`);
+const ActivityMinutes = z.number().int().min(ACTIVITY_LIMITS.minDuration, `At least ${ACTIVITY_LIMITS.minDuration} minutes`).max(ACTIVITY_LIMITS.maxDuration, `At most ${ACTIVITY_LIMITS.maxDuration} minutes`)
+  .describe("How long it runs, in whole minutes, exactly as the user said it");
+const ActivityAge = z.number().int().min(0).max(ACTIVITY_LIMITS.maxAge);
+const ActivitySupplies = z.array(z.string().trim().min(1, "A supply can't be empty").max(ACTIVITY_LIMITS.supplyMax, `Keep each supply under ${ACTIVITY_LIMITS.supplyMax} characters`))
+  .max(ACTIVITY_LIMITS.maxSupplies, `At most ${ACTIVITY_LIMITS.maxSupplies} supplies`);
+const ActivityPosition = z.number().int().min(0).max(ACTIVITY_LIMITS.maxActivities)
+  .describe("0-based row to insert at (the # shown in RUN-SHEET); \"after row #n\" is n + 1. Leave out to add at the end");
+const agesInOrder = (v: { ageMin?: number | null; ageMax?: number | null }) => v.ageMin == null || v.ageMax == null || v.ageMin <= v.ageMax;
+const AGES_MSG = { message: "The youngest age can't be above the oldest", path: ["ageMin"] };
+export const AddActivity = z.object({
+  op: z.literal("add_activity"),
+  name: ActivityName,
+  durationMin: ActivityMinutes,
+  ageMin: ActivityAge.optional().describe("Youngest age it suits"),
+  ageMax: ActivityAge.optional().describe("Oldest age it suits"),
+  supplies: ActivitySupplies.optional(),
+  position: ActivityPosition.optional(),
+  afterId: z.string().min(1).optional().describe("Insert right after this activity id (\"after cake\" → the cake row's id). Use instead of position"),
+}).refine(agesInOrder, AGES_MSG).describe("Organizer only. Add a row to the birthday party activity run-sheet. Start and end times are computed by the tool.");
+export const UpdateActivity = z.object({
+  op: z.literal("update_activity"),
+  activityId: z.string().min(1),
+  name: ActivityName.optional(),
+  durationMin: ActivityMinutes.optional(),
+  ageMin: ActivityAge.nullable().optional().describe("null with ageMax null: suits all ages"),
+  ageMax: ActivityAge.nullable().optional(),
+  supplies: ActivitySupplies.optional().describe("The full new list (replaces the old one)"),
+}).refine(agesInOrder, AGES_MSG).describe("Organizer only. Edit a run-sheet activity's name, minutes, ages or supplies.");
+export const MoveActivity = z.object({
+  op: z.literal("move_activity"),
+  activityId: z.string().min(1),
+  direction: z.enum(["up", "down"]).optional().describe("One row earlier or later"),
+  index: z.number().int().min(0).max(ACTIVITY_LIMITS.maxActivities - 1).optional().describe("Or the 0-based row to move it to"),
+}).refine(v => (v.direction === undefined) !== (v.index === undefined), { message: "Give a direction or an index, not both", path: ["direction"] })
+  .describe("Organizer only. Reorder the run-sheet: move an activity up, down, or to a row.");
+export const RemoveActivity = z.object({
+  op: z.literal("remove_activity"),
+  activityId: z.string().min(1),
+}).describe("Organizer only. Remove an activity from the run-sheet.");
+export const SetPartyStart = z.object({
+  op: z.literal("set_party_start"),
+  time: HHMM.nullable().describe("When the party starts, 24-hour HH:MM as the user said it (7 pm = 19:00); null removes it"),
+}).describe("Organizer only. Set the party start time. The tool computes each run-sheet row's start and end from it.");
+/** v8 Part 1e run-sheet ops: organizer only, never for a guest, and an AI proposal with one is always an approval card. */
+export const ACTIVITY_OPS: ReadonlySet<string> = new Set(["add_activity", "update_activity", "move_activity", "remove_activity", "set_party_start"]);
+
 /** v8 Part 1 organiser ops: an AI proposal containing one is always an approval card. */
 export const GUEST_LIST_OPS: ReadonlySet<string> = new Set(["add_household", "update_household", "remove_household", "add_guest", "update_guest", "remove_guest",
   "import_guests", "approve_join_request", "reject_join_request", "add_wishlist_item", "update_wishlist_item", "remove_wishlist_item", "set_wishlist_surprise"]);
@@ -465,7 +516,7 @@ export const V6_OPS: ReadonlySet<string> = new Set(["set_priorities", "add_vendo
 export const DIRECT_EDIT_OPS: ReadonlySet<string> = new Set(["rename_event", "set_partner_names", "rename_entity", "set_planned_amount", "save_idea", "dismiss_idea"]);
 /** Ops only the organiser may run, whoever built the batch. Listed so the guest check is explicit, not implied. */
 export const ORGANIZER_ONLY_OPS: ReadonlySet<string> = new Set(["add_budget_item", "remove_budget_item", "set_event_basics", "rebalance_budget",
-  "add_ideas", "save_idea", "dismiss_idea", "adopt_idea", "delete_event", ...V6_OPS, ...GUEST_LIST_OPS, ...RSVP_ORGANIZER_OPS]);
+  "add_ideas", "save_idea", "dismiss_idea", "adopt_idea", "delete_event", ...V6_OPS, ...GUEST_LIST_OPS, ...RSVP_ORGANIZER_OPS, ...ACTIVITY_OPS]);
 
 /** The commands the AI may propose (declared to Gemini). Unchanged by the direct-edit ops. */
 export const AgentCommand = z.discriminatedUnion("op", [
@@ -477,6 +528,7 @@ export const AgentCommand = z.discriminatedUnion("op", [
   AddHousehold, UpdateHousehold, RemoveHousehold, AddGuest, UpdateGuest, RemoveGuest, ImportGuests, ApproveJoinRequest, RejectJoinRequest,
   AddWishlistItem, UpdateWishlistItem, RemoveWishlistItem, SetWishlistSurprise, UnclaimWishlistItem,
   SetRsvpVip, RemoveRsvpEntry, RestoreRsvpEntry, MergeRsvpEntries, SetRsvpSettings,
+  AddActivity, UpdateActivity, MoveActivity, RemoveActivity, SetPartyStart,
 ]);
 export const Command = z.discriminatedUnion("op", [
   AdjustBudget, MoveSubEvent, ShiftBlock, SetTaskStatus, RecordPayment, SetRsvp,
@@ -489,6 +541,7 @@ export const Command = z.discriminatedUnion("op", [
   AddHousehold, UpdateHousehold, RemoveHousehold, AddGuest, UpdateGuest, RemoveGuest, ImportGuests, RequestJoin, ApproveJoinRequest, RejectJoinRequest,
   AddWishlistItem, UpdateWishlistItem, RemoveWishlistItem, SetWishlistSurprise, UnclaimWishlistItem,
   SubmitRsvpEntry, SetRsvpVip, RemoveRsvpEntry, RestoreRsvpEntry, MergeRsvpEntries, SetRsvpSettings,
+  AddActivity, UpdateActivity, MoveActivity, RemoveActivity, SetPartyStart,
 ]);
 export type Command = z.infer<typeof Command>;
 export type CommandInput = z.input<typeof Command>;
@@ -712,6 +765,38 @@ function wishExt(st: AgentState): WishExt {
 }
 const withWishlist = (st: AgentState, x: WishExt, wishlist: WishlistItem[], extra: Partial<WishExt> = {}): AgentState =>
   ({ ...st, event: { ...st.event, ext: { ...x, ...extra, wishlist } as WishExt } });
+// v8 Part 1e: the birthday party activity run-sheet.
+type BirthdayExtT = Extract<Ext, { type: "birthday" }>;
+export type RunSheetActivity = BirthdayExtT["activities"][number];
+function runSheetExt(st: AgentState): BirthdayExtT {
+  const x = st.event.ext;
+  if (x.type !== "birthday") throw new PlanError("The activity run-sheet is on birthday events only");
+  return x;
+}
+const withActivities = (st: AgentState, x: BirthdayExtT, activities: RunSheetActivity[], extra: Partial<BirthdayExtT> = {}): AgentState =>
+  ({ ...st, event: { ...st.event, ext: { ...x, ...extra, activities } as BirthdayExtT } });
+function activityIndex(x: BirthdayExtT, id: string): number {
+  const i = x.activities.findIndex(a => a.id === id);
+  if (i < 0) throw new PlanError(`No activity ${id} on the run-sheet`);
+  return i;
+}
+/** The default length of a run-sheet row adopted from an idea that doesn't say how long it runs. */
+export const DEFAULT_ACTIVITY_MINUTES = 30;
+/** Minutes an idea says it runs ("Magician show (45 minutes)", "a 2 hour workshop"), clamped to the run-sheet limits; else 30. */
+export function ideaActivityMinutes(i: { title: string; description?: string }): number {
+  const text = `${i.title} ${i.description ?? ""}`;
+  const m = /\b(\d{1,3})\s*[- ]?\s*(?:min|mins|minutes?)\b/i.exec(text);
+  const h = /\b(\d{1,2}(?:\.\d)?)\s*[- ]?\s*(?:hr|hrs|hours?)\b/i.exec(text);
+  const n = m ? Number(m[1]) : h ? Math.round(Number(h[1]) * 60) : DEFAULT_ACTIVITY_MINUTES;
+  return Math.min(ACTIVITY_LIMITS.maxDuration, Math.max(ACTIVITY_LIMITS.minDuration, n));
+}
+const cleanSupplies = (list: readonly string[]) => {
+  const out: string[] = [];
+  for (const raw of list) { const v = raw.trim(); if (v && !out.some(o => sameText(o, v))) out.push(v); }
+  return out;
+};
+const ageText = (r: readonly [number, number] | undefined) => (r ? `ages ${r[0]}–${r[1]}` : "all ages");
+
 /** Release every gift claimed by one of `guestIds` (they are leaving the list). */
 function releaseClaims(st: AgentState, guestIds: Set<string>): AgentState {
   const x = st.event.ext;
@@ -1155,7 +1240,7 @@ function apply(st: AgentState, c: Command, log: string[], role: Role = "organize
       if (role === "guest") throw new PlanError("Ideas are for the organiser");
       const i = st.ideas.find(x => x.id === c.ideaId);
       if (!i) throw new PlanError(`No idea ${c.ideaId}`);
-      if (i.adoptedTaskId || i.adoptedBudgetItemId) throw new PlanError(`"${i.title}" is already in the plan`);
+      if (i.adoptedTaskId || i.adoptedBudgetItemId || i.adoptedActivityId) throw new PlanError(`"${i.title}" is already in the plan`);
       const main = st.subEvents.find(x => x.isMain);
       const subEventId = c.subEvent ? findSubEvent(st, c.subEvent).id : main?.id ?? null;
       let next = st;
@@ -1173,8 +1258,23 @@ function apply(st: AgentState, c: Command, log: string[], role: Role = "organize
           plannedPaise: amount, quotedPaise: null, committedPaise: 0, payments: [], locked: false, quoteNotes: "", quoteRedFlags: [], basis: "flat" as const, perGuestPaise: null }] };
         log.push(`New ${i.category} line "${i.title}": planned ${rupees(amount)}`);
       }
-      if (!taskId && !itemId) throw new PlanError(`Nothing to add for "${i.title}": it has no cost or category, and no task was asked for`);
-      return { ...next, ideas: next.ideas.map(x => x.id === i.id ? { ...x, status: "saved" as const, adoptedTaskId: taskId, adoptedBudgetItemId: itemId } : x) };
+      // v8 Part 1e: an activity idea on a birthday also becomes a run-sheet row (its own minutes when it says, else 30),
+      // in the same batch, so one Undo takes back the task, the line and the row together.
+      let activityId: string | null = null;
+      const bx = next.event.ext;
+      if (i.kind === "activity" && bx.type === "birthday") {
+        const name = i.title.trim().slice(0, ACTIVITY_LIMITS.nameMax).trim();
+        if (bx.activities.some(a => sameText(a.name, name))) log.push(`"${name}" is already on the run-sheet`);
+        else if (bx.activities.length >= ACTIVITY_LIMITS.maxActivities) log.push(`The run-sheet is full (${ACTIVITY_LIMITS.maxActivities} activities), so no row was added`);
+        else {
+          activityId = uniqueId(`ac-${slug(name).slice(0, 28)}`, k => bx.activities.some(a => a.id === k));
+          const minutes = ideaActivityMinutes(i);
+          next = withActivities(next, bx, [...bx.activities, { id: activityId, name, durationMin: minutes, supplies: [] }]);
+          log.push(`New run-sheet row "${name}" (${minutes} min)`);
+        }
+      }
+      if (!taskId && !itemId && !activityId) throw new PlanError(`Nothing to add for "${i.title}": it has no cost or category, and no task was asked for`);
+      return { ...next, ideas: next.ideas.map(x => x.id === i.id ? { ...x, status: "saved" as const, adoptedTaskId: taskId, adoptedBudgetItemId: itemId, ...(activityId ? { adoptedActivityId: activityId } : {}) } : x) };
     }
     case "set_priorities": {
       if (role === "guest") throw new PlanError("Only the organiser can set priorities");
@@ -1437,6 +1537,79 @@ function apply(st: AgentState, c: Command, log: string[], role: Role = "organize
       if (w.claimedByGuestId !== c.guestId) throw new PlanError("You can only release a gift you claimed");
       log.push(`Wishlist "${w.item}": released`);
       return withWishlist(st, x, x.wishlist.map(i => i.id === w.id ? { ...i, claimedByGuestId: null } : i));
+    }
+    // ---------- v8 Part 1e: the birthday party activity run-sheet ----------
+    case "add_activity": {
+      if (role === "guest") throw new PlanError("Only the organiser can change the run-sheet");
+      const x = runSheetExt(st);
+      const name = c.name.trim();
+      if (x.activities.length >= ACTIVITY_LIMITS.maxActivities) throw new PlanError(`Keep the run-sheet to ${ACTIVITY_LIMITS.maxActivities} activities`);
+      if (x.activities.some(a => sameText(a.name, name))) throw new PlanError(`"${name}" is already on the run-sheet`);
+      if (c.position !== undefined && c.afterId !== undefined) throw new PlanError("Give a position or an activity to follow, not both");
+      const at = c.afterId !== undefined ? activityIndex(x, c.afterId) + 1 : c.position ?? x.activities.length;
+      if (at > x.activities.length) throw new PlanError(`The run-sheet has ${x.activities.length} rows: position ${at} is past the end`);
+      const ageRange: [number, number] | undefined = c.ageMin === undefined && c.ageMax === undefined ? undefined : [c.ageMin ?? 0, c.ageMax ?? ACTIVITY_LIMITS.maxAge];
+      const id = uniqueId(`ac-${slug(name).slice(0, 28)}`, k => x.activities.some(a => a.id === k));
+      const row: RunSheetActivity = { id, name, durationMin: c.durationMin, supplies: cleanSupplies(c.supplies ?? []), ...(ageRange ? { ageRange } : {}) };
+      const activities = [...x.activities.slice(0, at), row, ...x.activities.slice(at)];
+      const times = computeRunSheetTimes(x.partyStart, activities);
+      log.push(`Added "${name}" (${c.durationMin} min) to the run-sheet${at < x.activities.length ? ` as row ${at + 1}` : ""}${times ? `: ${times[at]!.label}` : ""}`);
+      return withActivities(st, x, activities);
+    }
+    case "update_activity": {
+      if (role === "guest") throw new PlanError("Only the organiser can change the run-sheet");
+      const x = runSheetExt(st);
+      const a = x.activities[activityIndex(x, c.activityId)]!;
+      const name = c.name?.trim() ?? a.name;
+      if (c.name !== undefined && x.activities.some(o => o.id !== a.id && sameText(o.name, name))) throw new PlanError(`"${name}" is already on the run-sheet`);
+      let ageRange = a.ageRange;
+      if (c.ageMin !== undefined || c.ageMax !== undefined) {
+        if (c.ageMin === null || c.ageMax === null) {
+          if (typeof c.ageMin === "number" || typeof c.ageMax === "number") throw new PlanError("Give both ages, or clear both for all ages");
+          ageRange = undefined;
+        } else {
+          const lo = c.ageMin ?? ageRange?.[0] ?? 0, hi = c.ageMax ?? ageRange?.[1] ?? ACTIVITY_LIMITS.maxAge;
+          if (lo > hi) throw new PlanError("The youngest age can't be above the oldest");
+          ageRange = [lo, hi];
+        }
+      }
+      const next: RunSheetActivity = { ...a, name, durationMin: c.durationMin ?? a.durationMin, supplies: c.supplies !== undefined ? cleanSupplies(c.supplies) : a.supplies };
+      if (ageRange) next.ageRange = ageRange; else delete next.ageRange;
+      const changed = [c.name !== undefined && name !== a.name ? "name" : "", c.durationMin !== undefined && c.durationMin !== a.durationMin ? `${c.durationMin} min` : "",
+        ageText(ageRange) !== ageText(a.ageRange) ? ageText(ageRange) : "", c.supplies !== undefined && next.supplies.join("|") !== a.supplies.join("|") ? "supplies" : ""].filter(Boolean);
+      if (!changed.length) { log.push(`"${a.name}" is unchanged`); return st; }
+      log.push(`Run-sheet "${name}": ${changed.join(", ")}`);
+      return withActivities(st, x, x.activities.map(o => o.id === a.id ? next : o));
+    }
+    case "move_activity": {
+      if (role === "guest") throw new PlanError("Only the organiser can change the run-sheet");
+      const x = runSheetExt(st);
+      const from = activityIndex(x, c.activityId);
+      const a = x.activities[from]!;
+      const to = c.direction === "up" ? from - 1 : c.direction === "down" ? from + 1 : c.index!;
+      if (to < 0) throw new PlanError(`"${a.name}" is already first`);
+      if (to >= x.activities.length) throw new PlanError(c.direction === "down" ? `"${a.name}" is already last` : `The run-sheet has ${x.activities.length} rows`);
+      if (to === from) { log.push(`"${a.name}" is already row ${from + 1}`); return st; }
+      const rest = x.activities.filter(o => o.id !== a.id);
+      const activities = [...rest.slice(0, to), a, ...rest.slice(to)];
+      log.push(`Moved "${a.name}" to row ${to + 1} of ${activities.length}`);
+      return withActivities(st, x, activities);
+    }
+    case "remove_activity": {
+      if (role === "guest") throw new PlanError("Only the organiser can change the run-sheet");
+      const x = runSheetExt(st);
+      const a = x.activities[activityIndex(x, c.activityId)]!;
+      log.push(`Removed "${a.name}" from the run-sheet`);
+      const next = withActivities(st, x, x.activities.filter(o => o.id !== a.id));
+      // An idea adopted into this row can be adopted again only through its task; just drop the stale link.
+      return next.ideas.some(i => i.adoptedActivityId === a.id) ? { ...next, ideas: next.ideas.map(i => i.adoptedActivityId === a.id ? { ...i, adoptedActivityId: null } : i) } : next;
+    }
+    case "set_party_start": {
+      if (role === "guest") throw new PlanError("Only the organiser can change the run-sheet");
+      const x = runSheetExt(st);
+      if (x.partyStart === c.time) { log.push(c.time ? `The party already starts at ${formatClock(parseHHMM(c.time)!)}` : "No start time is set"); return st; }
+      log.push(c.time ? `Party starts at ${formatClock(parseHHMM(c.time)!)}; the run-sheet ends at ${runSheetEnd(c.time, x.activities)}` : "Party start time removed: the run-sheet shows durations only");
+      return withActivities(st, x, x.activities, { partyStart: c.time });
     }
     case "set_guest_diet": {
       const g = st.guests.find(x => x.id === c.guestId);
