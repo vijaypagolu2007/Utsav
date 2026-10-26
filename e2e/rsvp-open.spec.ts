@@ -1,6 +1,7 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { skipWelcome, submitRsvp } from "./helpers";
 
 // v8 Part 1c (open RSVP): the organizer copies the one RSVP link; a guest in a new browser sends a family of 4, Veg, Mehendi
@@ -172,7 +173,7 @@ test("open RSVP end to end: copy link → family of 4 → dashboard counts → e
   await expect(g.p.getByTestId("rsvp-closed-mine")).toContainText("Coming, 5 people");
   // A fresh device can't send one either (the server refuses, not just the page).
   const late = await d.p.request.post(`${new URL(url).origin}/api/events/${url.split("/guest/")[1]!.split("#")[0]}/rsvp`, {
-    headers: { "x-guest-token": url.split("#k=")[1]!, "x-device-token": "8f14e45f-ceea-4e7a-9d1b-0000000000aa", "x-forwarded-for": rnd() },
+    headers: { "x-guest-token": url.split("#k=")[1]!, "x-device-token": randomUUID(), "x-forwarded-for": rnd() },
     data: { name: "Late", partySize: 1, functions: ["s4"], meal: "veg", answer: "coming" } });
   expect(late.status()).toBe(403);
   expect((await late.json()).message).toBe("RSVP period has ended");
