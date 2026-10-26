@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ButtonHTMLAttributes, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type ButtonHTMLAttributes, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { BadgeCheck, Calculator, Check, CircleHelp, FileText, Pencil, X } from "lucide-react";
 import { FIGURE_HINT, FIGURE_LABEL, type FigureKind } from "@/vendors";
 import { daysBetween, MAX_DIRECT_AMOUNT_PAISE, MAX_NAME_LENGTH, weekdayOf, type BatchInput, type BatchResult } from "@/commands";
@@ -39,20 +39,6 @@ export function useMediaQuery(query: string, serverDefault = true): boolean {
     () => window.matchMedia(query).matches,
     () => serverDefault,
   );
-}
-
-/** Content-box width of an element, measured before paint and kept current. null until measured (server render). */
-export function useElementWidth(ref: RefObject<HTMLElement | null>): number | null {
-  const [w, setW] = useState<number | null>(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    setW(el.getBoundingClientRect().width);
-    const ro = new ResizeObserver(([e]) => { if (e) setW(e.contentRect.width); });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [ref]);
-  return w;
 }
 
 // ---------- building blocks ----------
@@ -191,7 +177,7 @@ export const saveWith = (commit: (b: BatchInput) => BatchResult, batch: BatchInp
  * parsing or from the reducer) stay visible under the input, linked with aria-describedby, until the next try.
  * Targets are 32px on desktop and 44px on touch-sized screens and coarse pointers.
  */
-export function InlineEdit({ label, value, kind = "text", onSave, children, className = "", grow = false, inputSize = "w-56", hint, testId }: {
+export function InlineEdit({ label, value, kind = "text", onSave, children, className = "", grow = false, inputSize = "w-56", hint, testId, large = false }: {
   /** Names the field ("Name of budget line Haldi marigold decor"); the button is "Edit <label>". */
   label: string;
   /** The current value as the input should show it: text, whole rupees, or "HH:MM". */
@@ -205,6 +191,8 @@ export function InlineEdit({ label, value, kind = "text", onSave, children, clas
   inputSize?: string;
   hint?: string;
   testId?: string;
+  /** v8 Part 1e: 44px targets at every width (the run-sheet), not just on touch-sized screens. */
+  large?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -231,13 +219,14 @@ export function InlineEdit({ label, value, kind = "text", onSave, children, clas
   const onKey = (e: ReactKeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); stop(); } };
   const hintText = hint ?? (kind === "rupees" ? "Whole rupees" : undefined);
   const touch = "max-md:h-11 max-md:w-11 pointer-coarse:h-11 pointer-coarse:w-11";
+  const pencil = large ? "h-11 w-11" : `h-8 w-8 ${touch}`, square = large ? "h-11 w-11" : `h-9 w-9 ${touch}`;
 
   if (!editing) {
     return (
       <div className={`flex min-w-0 items-center gap-1 ${grow ? "flex-1" : ""} ${className}`}>
         <div className={`min-w-0 ${grow ? "flex-1" : ""}`}>{children}</div>
         <button ref={btn} type="button" onClick={start} aria-label={`Edit ${label}`} title={`Edit ${label}`} data-testid={testId}
-          className={`grid h-8 w-8 shrink-0 place-items-center rounded-md text-ink-muted hover:bg-sand-100 hover:text-ink ${touch}`}>
+          className={`grid ${pencil} shrink-0 place-items-center rounded-md text-ink-muted hover:bg-sand-100 hover:text-ink`}>
           <Pencil size={15} aria-hidden="true" />
         </button>
       </div>
@@ -251,12 +240,12 @@ export function InlineEdit({ label, value, kind = "text", onSave, children, clas
         <input ref={input} id={`${id}-in`} type={kind === "time" ? "time" : "text"} value={draft} onChange={e => setDraft(e.target.value)}
           inputMode={kind === "rupees" ? "numeric" : undefined} autoComplete="off" spellCheck={kind === "text"}
           aria-invalid={error ? true : undefined} aria-describedby={[error ? errId : "", hintText ? hintId : ""].filter(Boolean).join(" ") || undefined}
-          className={`h-9 w-full min-w-0 rounded-lg border bg-surface px-2.5 text-sm text-ink tabular-nums max-md:h-11 pointer-coarse:h-11 ${kind === "rupees" ? "pl-6" : ""} ${error ? "border-danger" : "border-line-strong"}`} />
+          className={`${large ? "h-11" : "h-9 max-md:h-11 pointer-coarse:h-11"} w-full min-w-0 rounded-lg border bg-surface px-2.5 text-sm text-ink tabular-nums ${kind === "rupees" ? "pl-6" : ""} ${error ? "border-danger" : "border-line-strong"}`} />
       </span>
-      <button type="submit" aria-label={`Save ${label}`} title="Save (Enter)" className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary text-white hover:bg-primary-hover ${touch}`}>
+      <button type="submit" aria-label={`Save ${label}`} title="Save (Enter)" className={`grid ${square} shrink-0 place-items-center rounded-lg bg-primary text-white hover:bg-primary-hover`}>
         <Check size={16} aria-hidden="true" />
       </button>
-      <button type="button" onClick={stop} aria-label={`Cancel editing ${label}`} title="Cancel (Esc)" className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line-strong bg-surface text-sand-700 hover:bg-sand-100 ${touch}`}>
+      <button type="button" onClick={stop} aria-label={`Cancel editing ${label}`} title="Cancel (Esc)" className={`grid ${square} shrink-0 place-items-center rounded-lg border border-line-strong bg-surface text-sand-700 hover:bg-sand-100`}>
         <X size={16} aria-hidden="true" />
       </button>
       {hintText && <span id={hintId} className="sr-only">{hintText}</span>}

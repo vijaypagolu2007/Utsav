@@ -17,7 +17,7 @@ import { executeAgentTool, summarizePlan } from "../agent";
 import { functionDeclarations, guestFunctionDeclarations } from "../gemini-tools";
 import { MemoryStore, setStoreForTests } from "../server/store";
 import { createSharedEvent, getGuestView, getJoinInfo, getOrganizerEvent, postGuestActions, postJoinRequest, postRsvp, putOrganizerEvent, RATE, resetHouseholdInvite, setJoinLink } from "../server/events";
-import { pageForPath, PAGES, pagesForDiff } from "../routes";
+import { pageForInsight, pageForPath, PAGES, pagesForDiff } from "../routes";
 import { MAX_SNAPSHOTS, parseStore, serializeStore, type Store } from "../persistence";
 
 const TODAY = "2026-10-25";
@@ -159,6 +159,18 @@ describe("import_guests: dedupe by E.164 phone, one approval card", () => {
     const st = okState(applyBatch(royalWedding, pv.batch!, { source: "ui" }));
     assert.equal(st.guests.length - royalWedding.guests.length, pv.guests.length);
     assert.equal(previewImport(withPhone, [{ name: "dup", phone: "9848012345" }], "vcf").batch, null);
+  });
+  test("v8 Part 1f: a guest RSVP change and the haven't-confirmed flag point to the Guests page (no RSVP matrix on Event)", () => {
+    const g = royalWedding.guests.find(x => Object.keys(x.rsvp).length > 0)!;
+    const sid = Object.keys(g.rsvp)[0]!;
+    const slug = royalWedding.subEvents.find(s => s.id === sid)!.slug;
+    const answer = g.rsvp[sid] === "no" ? "yes" : "no";
+    const d = computePlanDiff(royalWedding, okState(run(royalWedding, [{ op: "set_rsvp", guestId: g.id, subEvent: slug, answer }])));
+    assert.ok(d.rows.some(r => r.kind === "rsvp" && r.id === g.id));
+    assert.deepEqual(pagesForDiff(d.rows, "overview").map(p => p.id), ["guests"]);
+    assert.deepEqual(pagesForDiff(d.rows, "guests").map(p => p.id), []);
+    assert.equal(pageForInsight("rsvp_pending").id, "guests");
+    assert.equal(pageForInsight("wishlist_unclaimed").id, "event");
   });
   test("a big import collapses to one diff row and links the Guests page", () => {
     const entries = Array.from({ length: 40 }, (_, i) => ({ name: `Guest ${i}`, phone: `90000${String(10000 + i)}` }));

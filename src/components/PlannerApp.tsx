@@ -219,6 +219,23 @@ export default function PlannerApp({ children }: { children?: ReactNode }) {
     return res;
   };
   const commit: Commit = (batch, label) => commitWith(role, batch, label, "ui");
+  /**
+   * v8 Part 1e: a dashboard edit whose toast carries Undo for UNDO_MS (10 s), like deleting an event. Undo steps the
+   * history back only while this edit is still the latest step; after another edit the header's Undo/Redo is the way back.
+   */
+  const commitUndoable: Commit = (batch, label) => {
+    const res = applyBatch(current(), batch, { role, source: "ui", now: new Date().toISOString() });
+    if (!res.ok) { toast("rose", `Not applied: ${res.reason}`); return res; }
+    push(res.state, label ?? batch.summary, false);
+    const testId = `undo-edit-${++uid}`;
+    toast("slate", `${res.log.join(" · ") || batch.summary}.`, undefined, { label: "Undo", testId, onClick: () => {
+      setToasts(t => t.filter(x => x.action?.testId !== testId));
+      const h = currentHist();
+      if (h.snaps[h.idx]?.plan === res.state && h.idx > 0) goTo(h.idx - 1);
+      else toast("rose", "Not undone: the plan changed since. Use Undo in the header.");
+    } });
+    return res;
+  };
   const loadPlan = (p: AgentState, label: string) => { push(p, label); toast("emerald", `Loaded ${p.event.title}`); };
   const switchTemplate = (t: TemplateId) => {
     if (t === storeRef.current.active) return;
@@ -697,7 +714,7 @@ export default function PlannerApp({ children }: { children?: ReactNode }) {
   const wide = useMediaQuery("(min-width: 768px)", true);
   const kpiCtx = kpiContext(plan, today);
   const copilotDialogId = `${copilotTitleId}-dialog`;
-  const ctx: PlannerState = { plan, today, insights, template, role, highlight, busy, commit, flash, showInsight, ask: askFromDashboard, scan: scanFromDashboard,
+  const ctx: PlannerState = { plan, today, insights, template, role, highlight, busy, commit, commitUndoable, flash, showInsight, ask: askFromDashboard, scan: scanFromDashboard,
     createPlan, requestIdeas, ideasBusy, aiMode: mode, forceOffline, requestVendorQuestions,
     eventActions: { isSample: activeIsSample, requestDelete: () => requestDelete(storeRef.current.active), resetSample: resetTemplate, noEvents, restoreSamples: restoreSampleEvents },
     sharing: { share: shared.share, status: shared.status, publish: () => void shared.publish(), syncNow: shared.syncNow, resetInvite: shared.resetInvite, setJoinLink: shared.setJoinLink, resetRsvpLink: shared.resetRsvpLink,

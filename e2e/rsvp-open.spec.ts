@@ -211,3 +211,32 @@ for (const scheme of ["light", "dark"] as const) {
     }
   });
 }
+
+test("v8 Part 1f: the wedding Event page has no RSVP matrix; its one link opens the RSVP dashboard on Guests", async ({ page }) => {
+  for (const width of [1280, 375]) {
+    await page.setViewportSize({ width, height: width < 768 ? 740 : 900 });
+    await page.goto("/event");
+    const card = page.locator("#event");
+    await expect(card.getByRole("heading", { name: "Wedding · Couple & Traditions" })).toBeVisible();
+    await expect(card).toContainText("Dietary counts · Muhurtham (yes)");
+    await expect(card.getByTestId("wishlist-manager")).toBeVisible();
+    // Nothing of the old matrix or its narrow household cards: no column header, no totals list, no RSVP cycle buttons.
+    await expect(card).not.toContainText("Household · guest");
+    await expect(card.getByRole("list", { name: "RSVP totals" })).toHaveCount(0);
+    await expect(card.locator("summary")).toHaveCount(0);
+    await expect(card.getByRole("button", { name: /Activate to change to/ })).toHaveCount(0);
+    expect(await overflowX(page), `event page fits at ${width}`).toBeLessThanOrEqual(0);
+    const link = card.getByTestId("event-manage-rsvps");
+    await expect(link).toHaveText("Manage RSVPs on Guests");
+    if (width === 375) expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await link.click();
+    await expect(page).toHaveURL(/\/guests$/);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Guests");
+    // The equivalents of what the matrix showed: headcount per function, and each guest's per-function status.
+    await expect(page.getByTestId("rsvp-dashboard")).toBeVisible();
+    await expect(page.getByTestId("rsvp-fn-table")).toBeVisible();
+    await expect(page.getByTestId("rsvp-fn-count-s4")).toBeVisible();
+    await page.getByTestId("guests-optional").locator("summary").click();
+    await expect(page.locator('[data-testid^="rsvp-chip-"]').first()).toBeVisible();
+  }
+});

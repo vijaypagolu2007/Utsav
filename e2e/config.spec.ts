@@ -31,7 +31,7 @@ test("the event menu lists the registry under Samples and each template renders 
   await expect(samples).toHaveText([/^Royal Wedding\s*Wedding · ₹25L$/, /^30th Arcade Birthday\s*Birthday · ₹1\.5L$/, /^Community Cultural Fest\s*Community event · ₹5L$/]);
   await page.keyboard.press("Escape");
   const want: Record<string, string[]> = {
-    wedding: ["Wedding · RSVP Matrix & Traditions", "Dietary counts · Muhurtham (yes)"],
+    wedding: ["Wedding · Couple & Traditions", "Dietary counts · Muhurtham (yes)", "Gift registry", "Manage RSVPs on Guests"],
     birthday: ["Birthday · Rohan turns 30 · Retro arcade · 80s neon", "Gift wishlist", "Party activity run-sheet"],
     community: ["Community · Sponsors & Permits", "Sponsor pipeline", "Municipal permits"],
   };

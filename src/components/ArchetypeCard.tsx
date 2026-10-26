@@ -2,178 +2,23 @@
 // The event-type card: a generic frame that renders the sections the active template's layout lists
 // (config/event-templates.ts). Each section is an ordinary component keyed by its id; configuration only picks and
 // arranges them, so a new template reuses these instead of needing a fourth hand-built layout.
-import { useId, useRef, useState, type ComponentType, type FormEvent, type ReactNode } from "react";
-import { Building2, Cake, Check, ChevronDown, CircleHelp, ExternalLink, Eye, EyeOff, Gift, Handshake, Heart, Megaphone, Plus, ShieldCheck, Sparkles, Timer, Trash2, Users, X } from "lucide-react";
+import { useContext, useId, useState, type ComponentType, type FormEvent, type ReactNode } from "react";
+import { ArrowDown, ArrowUp, Building2, Cake, ExternalLink, Eye, EyeOff, Gift, Handshake, Heart, Megaphone, Plus, ShieldCheck, Sparkles, Timer, Trash2, Users, X } from "lucide-react";
 import ApprovalPreview from "./ApprovalPreview";
 import type { AgentState, SponsorTier } from "@/schema";
-import { daysBetween } from "@/commands";
+import { ACTIVITY_LIMITS, daysBetween } from "@/commands";
+import { computeRunSheetTimes, parseAges, parseMinutes, runSheetEnd, runSheetTotal } from "@/run-sheet";
+import { PlannerContext } from "./planner-context";
 import type { Commit, Highlight } from "./PlannerApp";
-import { refAnchor } from "@/routes";
-import { Badge, Card, Empty, IconButton, InlineEdit, inr, longDate, parseInline, relDays, saveWith, useElementWidth, useHighlight, type Tone } from "./ui";
+import Link from "next/link";
+import { pageById, refAnchor } from "@/routes";
+import { Badge, Card, Empty, IconButton, InlineEdit, inr, longDate, parseInline, relDays, saveWith, useHighlight, type Tone } from "./ui";
 import { sponsorProgress } from "@/budget-a11y";
 import { formatTokens, templateTokens, type EventTemplate, type OrganizerSectionId } from "@/config/event-templates";
-import { GUEST_RSVP_ANSWERS, labelOf, PERMIT_STATUS_OPTIONS, RSVP_CYCLE, RSVP_LABELS, SPONSOR_STATUS_OPTIONS, SPONSOR_TIER_OPTIONS } from "@/config/planner-options";
+import { labelOf, PERMIT_STATUS_OPTIONS, SPONSOR_STATUS_OPTIONS, SPONSOR_TIER_OPTIONS } from "@/config/planner-options";
 
 type SectionProps = { plan: AgentState; today: string; commit: Commit; highlight: Highlight; onAsk: (text: string) => void };
 type Props = SectionProps & { template: EventTemplate };
-const RSVP_STYLE: Record<string, string> = {
-  yes: "bg-emerald-700 text-white", no: "bg-red-100 text-red-800 ring-1 ring-inset ring-red-300", maybe: "bg-amber-100 text-amber-900 ring-1 ring-inset ring-amber-300", invited: "bg-sand-100 text-sand-700 ring-1 ring-inset ring-sand-400",
-};
-// Each answer has an icon as well as a colour and a word.
-const RSVP_ICON: Record<string, ReactNode> = { yes: <Check size={13} />, no: <X size={13} />, maybe: <CircleHelp size={13} />, invited: null };
-const ANSWER_ON: Record<string, string> = { yes: "bg-emerald-700 text-white ring-emerald-700", maybe: "bg-amber-700 text-white ring-amber-700", no: "bg-red-700 text-white ring-red-700" };
-/** The matrix needs about this much room; narrower containers (phones, the 1280px side column) get household cards. */
-const MATRIX_MIN_PX = 600;
-
-/**
- * Per-guest, per-sub-event RSVPs with tallies. Reads only guests and sub-events, so any event type can use it.
- * Wide containers get the matrix (one click cycles an answer); narrow ones get one collapsible card per household
- * with 44px Yes / Maybe / No buttons. Only one variant is rendered at a time; both send the same set_rsvp command.
- */
-type Commit_ = SectionProps["commit"];
-const renameGuest = (commit: Commit_, g: { id: string; name: string }) => (name: string) =>
-  saveWith(commit, { summary: `Rename guest ${g.name}`, commands: [{ op: "rename_entity", kind: "guest", id: g.id, name }] });
-const renameHousehold = (commit: Commit_, h: { id: string; label: string }) => (name: string) =>
-  saveWith(commit, { summary: `Rename household ${h.label}`, commands: [{ op: "rename_entity", kind: "household", id: h.id, name }] });
-
-function RsvpMatrix(props: SectionProps) {
-  const { plan } = props;
-  const box = useRef<HTMLDivElement>(null);
-  const width = useElementWidth(box);
-  const subs = plan.subEvents.filter(s => s.collectsRsvp).sort((a, b) => a.date.localeCompare(b.date));
-  return (
-    <div ref={box} className="min-w-0">
-      {plan.guests.length === 0 ? <Empty>No guests yet. The plan is sized for {plan.event.guestCount} guests.</Empty>
-        : width !== null && width < MATRIX_MIN_PX ? <RsvpHouseholds {...props} subs={subs} /> : <RsvpTable {...props} subs={subs} />}
-    </div>
-  );
-}
-
-type Sub = AgentState["subEvents"][number];
-const tally = (plan: AgentState, sid: string, v: string) => plan.guests.filter(g => g.rsvp[sid] === v).length;
-
-function RsvpTable({ plan, commit, highlight, subs }: SectionProps & { subs: Sub[] }) {
-  const hl = useHighlight(highlight);
-  const label = (v: keyof typeof RSVP_LABELS) => RSVP_LABELS[v];
-  return (
-    /* relative: absolutely-positioned sr-only text inside must be clipped by this scroller, not widen the page. */
-    <div className="relative min-w-0 overflow-x-auto">
-      <table className="w-full min-w-[36rem] border-separate border-spacing-y-1 text-sm">
-        <thead>
-          <tr className="text-left text-xs font-semibold uppercase tracking-wide text-ink-muted">
-            <th scope="col" className="py-1 pr-2">Household · guest</th>
-            {subs.map(s => <th scope="col" key={s.id} className="px-1 py-1 text-center">{s.name}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {plan.households.map(h => {
-            const gs = plan.guests.filter(g => g.householdId === h.id);
-            if (!gs.length) return null;
-            return [
-              <tr key={h.id}><td colSpan={subs.length + 1} className="pt-3 text-sm font-semibold text-ink">
-                <InlineEdit label={`household name ${h.label}`} value={h.label} onSave={renameHousehold(commit, h)}>
-                  <span>{h.label} <span className="font-normal text-ink-muted">· {h.side}</span></span>
-                </InlineEdit>
-              </td></tr>,
-              ...gs.map(g => (
-                <tr key={g.id} id={refAnchor(g.id)} className={hl(g.id)}>
-                  <th scope="row" className="py-0.5 pr-2 text-left font-normal text-sand-800">
-                    <InlineEdit label={`guest name ${g.name}`} value={g.name} inputSize="w-44" onSave={renameGuest(commit, g)}>
-                      <span>{g.name}{g.ageGroup !== "adult" && <span className="text-ink-muted"> ({g.ageGroup})</span>}{g.diet.length > 0 && <span className="ml-1 text-xs text-ink-muted">{g.diet.join(", ")}</span>}</span>
-                    </InlineEdit>
-                  </th>
-                  {subs.map(s => {
-                    const v = g.rsvp[s.id];
-                    return (
-                      <td key={s.id} className="px-1 py-0.5 text-center">
-                        {v ? (
-                          <button type="button" onClick={() => commit({ summary: `${g.name} · ${s.name}: ${RSVP_CYCLE[v]}`, commands: [{ op: "set_rsvp", guestId: g.id, subEvent: s.slug, answer: RSVP_CYCLE[v] }] })}
-                            title={`Click to change to ${label(RSVP_CYCLE[v])}`}
-                            className={`inline-flex min-h-8 w-20 items-center justify-center gap-1 rounded-md px-1 text-xs font-semibold capitalize ${RSVP_STYLE[v]}`}><span aria-hidden="true">{RSVP_ICON[v]}</span>{label(v)}<span className="sr-only">: {g.name}, {s.name}. Activate to change to {label(RSVP_CYCLE[v])}</span></button>
-                        ) : <><span aria-hidden="true" className="text-ink-muted">—</span><span className="sr-only">not invited</span></>}
-                      </td>
-                    );
-                  })}
-                </tr>
-              )),
-            ];
-          })}
-        </tbody>
-        <tfoot>
-          <tr className="text-xs text-ink-muted">
-            <th scope="row" className="pt-3 text-left font-semibold">Yes / No / Maybe / Pending</th>
-            {subs.map(s => <td key={s.id} className="pt-3 text-center tabular-nums"><span className="font-semibold text-emerald-800">{tally(plan, s.id, "yes")}</span>/{tally(plan, s.id, "no")}/{tally(plan, s.id, "maybe")}/{tally(plan, s.id, "invited")}</td>)}
-          </tr>
-        </tfoot>
-      </table>
-    </div>
-  );
-}
-
-function RsvpHouseholds({ plan, commit, highlight, subs }: SectionProps & { subs: Sub[] }) {
-  const hl = useHighlight(highlight);
-  return (
-    <div className="space-y-3">
-      <ul aria-label="RSVP totals" className="grid gap-1.5 text-sm tabular-nums">
-        {subs.map(s => (
-          <li key={s.id} className="flex flex-wrap items-baseline justify-between gap-x-3 rounded-lg bg-surface-muted px-3 py-1.5">
-            <span className="font-medium text-ink">{s.name}</span>
-            <span className="text-ink-muted"><span className="font-semibold text-emerald-800">{tally(plan, s.id, "yes")} yes</span> · {tally(plan, s.id, "no")} no · {tally(plan, s.id, "maybe")} maybe · {tally(plan, s.id, "invited")} pending</span>
-          </li>
-        ))}
-      </ul>
-      {plan.households.map(h => {
-        const gs = plan.guests.filter(g => g.householdId === h.id);
-        if (!gs.length) return null;
-        const pending = gs.reduce((n, g) => n + subs.filter(s => g.rsvp[s.id] === "invited" || g.rsvp[s.id] === "maybe").length, 0);
-        return (
-          <details key={h.id} className="group rounded-xl border border-line">
-            <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 rounded-xl px-3 py-2 hover:bg-sand-50 [&::-webkit-details-marker]:hidden">
-              <ChevronDown size={18} aria-hidden="true" className="shrink-0 text-sand-600 transition-transform group-open:rotate-180" />
-              <span className="min-w-0 flex-1"><span className="block text-base font-semibold text-ink">{h.label}</span>
-                <span className="block text-sm text-ink-muted">{h.side} · {gs.length} guest{gs.length > 1 ? "s" : ""}</span></span>
-              {pending > 0 ? <Badge tone="warning">{pending} to confirm</Badge> : <Badge tone="success"><Check size={12} aria-hidden="true" />All answered</Badge>}
-            </summary>
-            <div className="space-y-4 border-t border-line-soft px-3 py-3">
-              {/* Controls can't live inside <summary>, so the household's rename sits at the top of its panel. */}
-              <InlineEdit label={`household name ${h.label}`} value={h.label} onSave={renameHousehold(commit, h)}>
-                <span className="text-sm text-ink-muted">Household: <span className="font-medium text-ink">{h.label}</span></span>
-              </InlineEdit>
-              {gs.map(g => (
-                <div key={g.id} id={refAnchor(g.id)} className={hl(g.id)}>
-                  <InlineEdit label={`guest name ${g.name}`} value={g.name} onSave={renameGuest(commit, g)}>
-                    <p className="text-base font-medium text-ink">{g.name}{g.ageGroup !== "adult" && <span className="font-normal text-ink-muted"> ({g.ageGroup})</span>}</p>
-                  </InlineEdit>
-                  {g.diet.length > 0 && <p className="text-sm text-ink-muted">{g.diet.join(", ")}</p>}
-                  <ul className="mt-2 space-y-2">
-                    {subs.filter(s => g.rsvp[s.id]).map(s => {
-                      const v = g.rsvp[s.id]!;
-                      return (
-                        <li key={s.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-                          <span className="text-sm text-sand-800">{s.name}{v === "invited" && <span className="text-ink-muted"> · pending</span>}</span>
-                          <span role="group" aria-label={`${g.name}, ${s.name}`} className="flex gap-1.5">
-                            {GUEST_RSVP_ANSWERS.map(a => (
-                              <button key={a} type="button" aria-pressed={v === a}
-                                onClick={() => commit({ summary: `${g.name} · ${s.name}: ${a}`, commands: [{ op: "set_rsvp", guestId: g.id, subEvent: s.slug, answer: a }] })}
-                                className={`flex min-h-11 min-w-11 items-center justify-center gap-1 rounded-lg px-2.5 text-sm font-semibold capitalize ring-1 ring-inset ${v === a ? ANSWER_ON[a] : "bg-surface text-sand-800 ring-sand-400 hover:bg-sand-100"}`}>
-                                {v === a && <Check size={14} aria-hidden="true" />}{RSVP_LABELS[a]}
-                              </button>
-                            ))}
-                          </span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              ))}
-            </div>
-          </details>
-        );
-      })}
-    </div>
-  );
-}
-
 const sel = "min-h-9 rounded-lg border border-line-strong bg-surface px-2 text-sm text-ink max-md:min-h-11 pointer-coarse:min-h-11";
 const field = "mt-1 block min-h-10 w-full rounded-lg border border-line-strong bg-surface px-2.5 text-sm text-ink max-md:min-h-11";
 function SubHead({ icon, children, right }: { icon: ReactNode; children: ReactNode; right?: ReactNode }) {
@@ -208,6 +53,9 @@ function DietSummary({ plan }: SectionProps) {
       <h3 className="mb-2 text-base font-semibold text-ink">Dietary counts · {main?.name ?? "main"} (yes)</h3>
       {diets.size === 0 ? <p className="text-sm text-ink-muted">No confirmations yet.</p> :
         <ul className="space-y-1 text-sm">{[...diets].sort((a, b) => b[1] - a[1]).map(([d, n]) => <li key={d} className="flex justify-between gap-3"><span className="capitalize text-sand-700">{d}</span><b className="tabular-nums text-ink">{n}</b></li>)}</ul>}
+      {/* v8 Part 1f: RSVPs are answered through the RSVP link and managed on the Guests page, not here. */}
+      <Link href={pageById("guests").href} data-testid="event-manage-rsvps"
+        className="mt-3 inline-flex min-h-11 items-center text-sm font-semibold text-brand-800 underline underline-offset-2 hover:text-brand-900 md:min-h-9">Manage RSVPs on Guests</Link>
     </div>
   );
 }
@@ -332,26 +180,198 @@ function WishlistManager({ plan, commit, highlight }: SectionProps) {
   );
 }
 
-/** Birthday: the timed party activity run-sheet. */
-function ActivityRunSheet({ plan, highlight }: SectionProps) {
+const ageLabel = (r: readonly [number, number] | undefined) => (r ? (r[1] >= ACTIVITY_LIMITS.maxAge ? `ages ${r[0]}+` : `ages ${r[0]}–${r[1]}`) : "all ages");
+const big = "flex min-h-11 items-center justify-center gap-1.5 rounded-lg px-4 text-sm font-semibold";
+const square = "grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-line-strong bg-surface text-ink hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50";
+
+/**
+ * Birthday: the party activity run-sheet (v8 Part 1e). The organizer adds, edits (name, minutes, ages, supplies),
+ * reorders and removes rows, and sets when the party starts; each row's start and end come from run-sheet.ts (minutes
+ * arithmetic in code). Removing a row has a 10 s Undo on its toast. Guests never get these controls.
+ */
+function ActivityRunSheet({ plan, commit, highlight }: SectionProps) {
   const hl = useHighlight(highlight);
+  // Inside the planner the shared state gives the role and the Undo-toast commit; a bare render (tests) is the organizer's.
+  const ctx = useContext(PlannerContext);
+  const role = ctx?.role ?? "organizer", commitUndoable = ctx?.commitUndoable ?? commit;
   const ext = plan.event.ext;
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState({ name: "", minutes: "30", ageMin: "", ageMax: "", supplies: "" });
+  const [error, setError] = useState<string | null>(null);
+  const [startDraft, setStartDraft] = useState<string | null>(null);
+  const [supplyDraft, setSupplyDraft] = useState<Record<string, string>>({});
+  const [supplyError, setSupplyError] = useState<Record<string, string>>({});
+  const formId = useId();
   if (ext.type !== "birthday") return null;
-  return (
+  const total = runSheetTotal(ext.activities);
+  const times = computeRunSheetTimes(ext.partyStart, ext.activities);
+  const ends = runSheetEnd(ext.partyStart, ext.activities);
+  const editable = role === "organizer";
+  const full = ext.activities.length >= ACTIVITY_LIMITS.maxActivities;
+  const head = <SubHead icon={<Timer size={16} className="text-peacock-700" />} right={<span data-testid="activity-total">Total run time <b className="text-ink">{total} min</b>{ends && <> · ends <b className="text-ink">{ends}</b></>}</span>}>Party activity run-sheet</SubHead>;
+
+  if (!editable) return (
     <div className="min-w-0">
-      <SubHead icon={<Timer size={16} className="text-peacock-700" />} right={<>Total run time <b className="text-ink">{ext.activities.reduce((x, a) => x + a.durationMin, 0)} min</b></>}>Party activity run-sheet</SubHead>
+      {head}
       {ext.activities.length === 0 ? <Empty>No activities yet.</Empty> : (
-        <ul className="divide-y divide-line-soft rounded-xl ring-1 ring-inset ring-line">
-          {ext.activities.map(a => (
-            <li key={a.id} id={refAnchor(a.id)} className={`px-3 py-2.5 ${hl(a.id)}`}>
+        <ol className="divide-y divide-line-soft rounded-xl ring-1 ring-inset ring-line">
+          {ext.activities.map((a, k) => (
+            <li key={a.id} id={refAnchor(a.id)} data-testid="activity-row" className={`px-3 py-2.5 ${hl(a.id)}`}>
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                 <span className="text-base font-medium text-ink">{a.name}</span>
-                <span className="text-sm tabular-nums text-ink-muted">{a.durationMin} min · ages {a.ageRange ? `${a.ageRange[0]}–${a.ageRange[1]}` : "all"}</span>
+                <span className="text-sm tabular-nums text-ink-muted">{times && <>{times[k]!.label} · </>}{a.durationMin} min · {ageLabel(a.ageRange)}</span>
               </div>
               {a.supplies.length > 0 && <div className="mt-1.5 flex flex-wrap gap-1.5"><span className="sr-only">Supplies:</span>{a.supplies.map(x => <Badge key={x}>{x}</Badge>)}</div>}
             </li>
           ))}
-        </ul>
+        </ol>
+      )}
+    </div>
+  );
+
+  const upd = (a: { id: string; name: string }, patch: Record<string, unknown>, summary: string) =>
+    saveWith(commit, { summary, commands: [{ op: "update_activity", activityId: a.id, ...patch } as never] });
+  const move = (a: { id: string; name: string }, direction: "up" | "down") =>
+    commit({ summary: `Move ${a.name} ${direction}`, commands: [{ op: "move_activity", activityId: a.id, direction }] });
+  const remove = (a: { id: string; name: string }) => commitUndoable({ summary: `Remove ${a.name} from the run-sheet`, commands: [{ op: "remove_activity", activityId: a.id }] });
+  const setStart = (value: string) => {
+    const time = value.trim() || null;
+    setStartDraft(null);
+    if (time === ext.partyStart) return;
+    commit({ summary: time ? `Party starts at ${time}` : "Remove the party start time", commands: [{ op: "set_party_start", time }] });
+  };
+  const addSupply = (a: (typeof ext.activities)[number]) => {
+    const v = (supplyDraft[a.id] ?? "").trim();
+    if (!v) { setSupplyError({ ...supplyError, [a.id]: "Enter a supply." }); return; }
+    const err = upd(a, { supplies: [...a.supplies, v] }, `Add ${v} to ${a.name}`);
+    setSupplyError({ ...supplyError, [a.id]: err ?? "" });
+    if (!err) setSupplyDraft({ ...supplyDraft, [a.id]: "" });
+  };
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    const name = draft.name.trim();
+    if (!name) { setError("Name the activity."); return; }
+    const mins = parseMinutes(draft.minutes);
+    if (!mins.ok) { setError(mins.error); return; }
+    const age = (v: string) => (v.trim() === "" ? undefined : /^\d{1,3}$/.test(v.trim()) ? Number(v.trim()) : NaN);
+    const ageMin = age(draft.ageMin), ageMax = age(draft.ageMax);
+    if (Number.isNaN(ageMin) || Number.isNaN(ageMax)) { setError("Ages are whole numbers."); return; }
+    const supplies = draft.supplies.split(",").map(x => x.trim()).filter(Boolean);
+    const r = commit({ summary: `Add ${name} to the run-sheet`, commands: [{ op: "add_activity", name, durationMin: mins.value,
+      ...(ageMin !== undefined ? { ageMin } : {}), ...(ageMax !== undefined ? { ageMax } : {}), ...(supplies.length ? { supplies } : {}) }] });
+    if (!r.ok) { setError(r.reason); return; }
+    setError(null); setDraft({ name: "", minutes: "30", ageMin: "", ageMax: "", supplies: "" }); setAdding(false);
+  };
+  const addButton = (
+    <button type="button" onClick={() => { setAdding(true); setError(null); }} disabled={full} aria-expanded={adding} aria-controls={adding ? `${formId}-form` : undefined} data-testid="activity-add"
+      className={`${big} border border-line-strong bg-surface text-ink hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50`}>
+      <Plus size={15} aria-hidden="true" /> Add activity
+    </button>
+  );
+
+  return (
+    <div className="min-w-0" data-testid="activity-run-sheet">
+      {head}
+      <div className="mb-3 flex flex-wrap items-end gap-2">
+        <label className="text-sm text-ink-muted">Party starts at
+          <input type="time" value={startDraft ?? ext.partyStart ?? ""} onChange={e => setStartDraft(e.target.value)}
+            onBlur={e => { if (startDraft !== null) setStart(e.target.value); }}
+            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); setStart(e.currentTarget.value); } }}
+            data-testid="party-start" aria-describedby={`${formId}-start-hint`}
+            className="mt-1 block min-h-11 rounded-lg border border-line-strong bg-surface px-2.5 text-sm text-ink tabular-nums" />
+        </label>
+        {ext.partyStart && <button type="button" onClick={() => setStart("")} data-testid="party-start-clear" className={`${big} text-ink-muted underline-offset-2 hover:underline`}>Clear start time</button>}
+        <p id={`${formId}-start-hint`} className="basis-full text-xs text-ink-muted">{ext.partyStart ? "Each row's time is worked out from the start time and the minutes above it." : "Optional. Set it to see when each activity starts and ends."}</p>
+      </div>
+      {ext.activities.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-line-strong p-4 text-center" data-testid="activity-empty">
+          <p className="mb-3 text-sm text-ink-muted">No activities yet. Add games, the cake cutting and anything else with a time slot.</p>
+          {!adding && <div className="flex justify-center">{addButton}</div>}
+        </div>
+      ) : (
+        <ol className="space-y-2" aria-label="Run-sheet activities, in order">
+          {ext.activities.map((a, k) => (
+            <li key={a.id} id={refAnchor(a.id)} data-testid="activity-row" className={`rounded-xl p-3 ring-1 ring-inset ring-line ${hl(a.id)}`}>
+              <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+                <div className="min-w-0 flex-1 basis-48">
+                  {times && <p className="text-sm font-semibold tabular-nums text-peacock-800" data-testid="activity-time">{times[k]!.label}</p>}
+                  <InlineEdit large label={`activity name ${a.name}`} value={a.name} testId="activity-edit-name"
+                    onSave={(name: string) => name.length > ACTIVITY_LIMITS.nameMax ? `Use ${ACTIVITY_LIMITS.nameMax} characters or fewer.` : upd(a, { name }, `Rename ${a.name}`)}>
+                    <p className="break-words text-base font-medium text-ink">{a.name}</p>
+                  </InlineEdit>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <InlineEdit large label={`minutes for ${a.name}`} value={String(a.durationMin)} inputSize="w-24" hint={`Whole minutes, ${ACTIVITY_LIMITS.minDuration} to ${ACTIVITY_LIMITS.maxDuration}`} testId="activity-edit-minutes"
+                      onSave={(raw: string) => { const p = parseMinutes(raw); return p.ok ? upd(a, { durationMin: p.value }, `Minutes for ${a.name}`) : p.error; }}>
+                      <span className="text-sm tabular-nums text-ink" data-testid="activity-minutes">{a.durationMin} min</span>
+                    </InlineEdit>
+                    <InlineEdit large label={`ages for ${a.name}`} value={a.ageRange ? (a.ageRange[1] >= ACTIVITY_LIMITS.maxAge ? `${a.ageRange[0]}+` : `${a.ageRange[0]}-${a.ageRange[1]}`) : "all"} inputSize="w-28"
+                      hint="Like 5-12, 8+ or all" testId="activity-edit-ages"
+                      onSave={(raw: string) => { const p = parseAges(raw); return p.ok ? upd(a, { ageMin: p.ageMin, ageMax: p.ageMax }, `Ages for ${a.name}`) : p.error; }}>
+                      <span className="text-sm text-ink-muted" data-testid="activity-ages">{ageLabel(a.ageRange)}</span>
+                    </InlineEdit>
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <button type="button" className={square} onClick={() => move(a, "up")} disabled={k === 0} aria-label={`Move ${a.name} up`} title={`Move ${a.name} up`} data-testid="activity-up"><ArrowUp size={16} aria-hidden="true" /></button>
+                  <button type="button" className={square} onClick={() => move(a, "down")} disabled={k === ext.activities.length - 1} aria-label={`Move ${a.name} down`} title={`Move ${a.name} down`} data-testid="activity-down"><ArrowDown size={16} aria-hidden="true" /></button>
+                  <button type="button" className={`${square} text-danger`} onClick={() => remove(a)} aria-label={`Remove ${a.name}`} title={`Remove ${a.name}`} data-testid="activity-remove"><Trash2 size={16} aria-hidden="true" /></button>
+                </div>
+              </div>
+              <div className="mt-2">
+                <p className="sr-only">Supplies for {a.name}:</p>
+                <ul className="flex flex-wrap items-center gap-1.5" aria-label={`Supplies for ${a.name}`}>
+                  {a.supplies.map(x => (
+                    <li key={x} className="inline-flex min-h-11 items-center rounded-full bg-surface-muted pl-3 text-sm text-ink ring-1 ring-inset ring-line" data-testid="activity-supply">
+                      {x}
+                      <button type="button" onClick={() => upd(a, { supplies: a.supplies.filter(s2 => s2 !== x) }, `Remove ${x} from ${a.name}`)} aria-label={`Remove supply ${x} from ${a.name}`} title={`Remove ${x}`}
+                        data-testid="activity-edit-supply-remove" className="grid h-11 w-11 place-items-center rounded-full text-ink-muted hover:bg-surface hover:text-ink"><X size={14} aria-hidden="true" /></button>
+                    </li>
+                  ))}
+                  {a.supplies.length < ACTIVITY_LIMITS.maxSupplies && (
+                    <li>
+                      <form noValidate className="flex items-center gap-1" onSubmit={e => { e.preventDefault(); addSupply(a); }}>
+                        <label htmlFor={`${formId}-sup-${a.id}`} className="sr-only">Add a supply to {a.name}</label>
+                        <input id={`${formId}-sup-${a.id}`} value={supplyDraft[a.id] ?? ""} onChange={e => setSupplyDraft({ ...supplyDraft, [a.id]: e.target.value })} maxLength={ACTIVITY_LIMITS.supplyMax}
+                          placeholder="Add a supply" data-testid="activity-edit-supply-input" aria-invalid={supplyError[a.id] ? true : undefined}
+                          aria-describedby={supplyError[a.id] ? `${formId}-sup-err-${a.id}` : undefined}
+                          className="h-11 w-36 rounded-full border border-line-strong bg-surface px-3 text-sm text-ink placeholder:text-ink-muted" />
+                        <button type="submit" aria-label={`Add supply to ${a.name}`} title="Add supply" data-testid="activity-edit-supply-add" className={`${square} rounded-full`}><Plus size={15} aria-hidden="true" /></button>
+                      </form>
+                    </li>
+                  )}
+                </ul>
+                {supplyError[a.id] && <p id={`${formId}-sup-err-${a.id}`} role="alert" className="mt-1 text-sm font-medium text-danger">{supplyError[a.id]}</p>}
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+      {ext.activities.length > 0 && !adding && <div className="mt-3">{addButton}</div>}
+      {full && <p className="mt-2 text-sm text-ink-muted">The run-sheet holds up to {ACTIVITY_LIMITS.maxActivities} activities.</p>}
+      {adding && (
+        <form id={`${formId}-form`} onSubmit={submit} noValidate className="mt-3 grid gap-2 rounded-xl border border-dashed border-line-strong p-3 sm:grid-cols-2" aria-labelledby={`${formId}-h`} data-testid="activity-add-form">
+          <h4 id={`${formId}-h`} className="text-sm font-semibold text-ink sm:col-span-2">Add an activity</h4>
+          <label className="text-sm text-ink-muted sm:col-span-2">Activity
+            <input value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} maxLength={ACTIVITY_LIMITS.nameMax} data-testid="activity-add-name" aria-describedby={error ? `${formId}-err` : undefined} className={`${field} min-h-11`} autoFocus />
+          </label>
+          <label className="text-sm text-ink-muted">Minutes
+            <input value={draft.minutes} onChange={e => setDraft({ ...draft, minutes: e.target.value })} inputMode="numeric" data-testid="activity-add-minutes" className={`${field} min-h-11`} />
+          </label>
+          <label className="text-sm text-ink-muted">Supplies (comma-separated, optional)
+            <input value={draft.supplies} onChange={e => setDraft({ ...draft, supplies: e.target.value })} data-testid="activity-add-supplies" className={`${field} min-h-11`} />
+          </label>
+          <label className="text-sm text-ink-muted">Youngest age (optional)
+            <input value={draft.ageMin} onChange={e => setDraft({ ...draft, ageMin: e.target.value })} inputMode="numeric" data-testid="activity-add-age-min" className={`${field} min-h-11`} />
+          </label>
+          <label className="text-sm text-ink-muted">Oldest age (optional)
+            <input value={draft.ageMax} onChange={e => setDraft({ ...draft, ageMax: e.target.value })} inputMode="numeric" data-testid="activity-add-age-max" className={`${field} min-h-11`} />
+          </label>
+          {error && <p id={`${formId}-err`} role="alert" className="text-sm font-medium text-danger sm:col-span-2">{error}</p>}
+          <div className="flex flex-wrap gap-2 sm:col-span-2">
+            <button type="submit" data-testid="activity-add-submit" className={`${big} bg-primary text-white hover:bg-primary-hover`}><Plus size={15} aria-hidden="true" /> Add to run-sheet</button>
+            <button type="button" onClick={() => { setAdding(false); setError(null); }} data-testid="activity-add-cancel" className={`${big} border border-line-strong bg-surface text-ink hover:bg-surface-muted`}>Cancel</button>
+          </div>
+        </form>
       )}
     </div>
   );
@@ -448,7 +468,6 @@ function PermitTracker({ plan, today, commit, highlight }: SectionProps) {
 
 /** The component for every section id a template can list. Keyed by the id union, so none can be missing. */
 const SECTIONS: Record<OrganizerSectionId, ComponentType<SectionProps>> = {
-  "rsvp-matrix": RsvpMatrix,
   "couple-profile": CoupleProfile,
   "diet-summary": DietSummary,
   "wishlist-manager": WishlistManager,

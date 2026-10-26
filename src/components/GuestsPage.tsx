@@ -431,10 +431,13 @@ function HouseholdRow({ plan, h, hl, onReview }: { plan: AgentState; h: Househol
 
 /** One person on the optional guest list: name (inline rename), remove, and their invitation status per sub-event. */
 function GuestRow({ plan, g, onReview }: { plan: AgentState; g: GuestT; onReview: (r: { batch: BatchInput; label: string }) => void }) {
-  const { commit } = usePlanner();
+  const { commit, highlight } = usePlanner();
+  const hl = useHighlight(highlight);
   const subs = invitedSubs(plan, g);
   return (
-    <li className="space-y-1.5 py-2" data-testid={`guest-${g.id}`}>
+    /* v8 Part 1f: a Co-Pilot RSVP change or the "haven't confirmed" flag points here (#ref-<guest id>) now that the
+       Event page no longer has an RSVP matrix. */
+    <li id={refAnchor(g.id)} className={`space-y-1.5 py-2 ${hl(g.id)}`} data-testid={`guest-${g.id}`}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <InlineEdit label={`guest name ${g.name}`} value={g.name} grow
           onSave={(name: string) => saveWith(commit, { summary: `Rename guest ${g.name}`, commands: [{ op: "rename_entity", kind: "guest", id: g.id, name }] })}>

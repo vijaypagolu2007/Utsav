@@ -212,8 +212,9 @@ test("Needs attention: Show me opens the page that owns each flag and focuses th
   await expect(h1(page)).toHaveText("Budget");
   await showMeAndCheck(page, /^Show me ?: Pay caterer deposit/, "/tasks", "tasks");
   await expect(h1(page)).toHaveText("Tasks");
-  await showMeAndCheck(page, /^Show me ?: .*haven.t confirmed/, "/event", "event");
-  await expect(h1(page)).toHaveText("Event");
+  // v8 Part 1f: guest RSVPs live on the Guests page (the Event page's RSVP matrix is gone), inside the collapsed guest list.
+  await showMeAndCheck(page, /^Show me ?: .*haven.t confirmed/, "/guests", "guests");
+  await expect(h1(page)).toHaveText("Guests");
 });
 
 test("deep links: a fresh load of /budget, and of /budget#ref-b1, which focuses and highlights that line", async ({ page }) => {

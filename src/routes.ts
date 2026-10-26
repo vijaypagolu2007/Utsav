@@ -17,7 +17,7 @@ export const PAGES: readonly PlannerPage[] = [
   { id: "vendors", href: "/vendors", label: "Vendors", title: "Vendors", description: "The vendors this event needs, where each one stands, questions to ask, and quotes side by side." },
   { id: "tasks", href: "/tasks", label: "Tasks", title: "Tasks", description: "Every task with its derived due date, grouped by status." },
   { id: "schedule", href: "/schedule", label: "Schedule", title: "Schedule", description: "Sub-events, their run-of-show lanes and guest-link visibility." },
-  { id: "event", href: "/event", label: "Event", title: "Event", description: "The parts specific to this kind of event: RSVPs and diets, wishlist and activities, or sponsors and permits." },
+  { id: "event", href: "/event", label: "Event", title: "Event", description: "The parts specific to this kind of event: couple, diets and gift registry, wishlist and activities, or sponsors and permits." },
   { id: "guests", href: "/guests", label: "Guests", title: "Guests", description: "Households, phones and private invite links, imports from contacts, the group join link, and who changed which RSVP." },
   { id: "ideas", href: "/ideas", label: "Ideas", title: "Ideas", description: "Personalised themes, decor, menus, activities and more, sized to what is left in your budget." },
 ];
@@ -38,7 +38,7 @@ export const isSetupPath = (pathname: string | null | undefined) => ((pathname ?
 /** Where each kind of red flag lives, for "Show me". */
 const INSIGHT_PAGE: Record<InsightKind, PageId> = {
   overdue_deposit: "budget", upcoming_deposit: "budget", envelope_breach: "budget", over_budget: "budget",
-  urgent_task: "tasks", blocked_task: "tasks", permit_risk: "event", wishlist_unclaimed: "event", rsvp_pending: "event", sponsor_gap: "event",
+  urgent_task: "tasks", blocked_task: "tasks", permit_risk: "event", wishlist_unclaimed: "event", rsvp_pending: "guests", sponsor_gap: "event",
 };
 export const pageForInsight = (kind: InsightKind): PlannerPage => pageById(INSIGHT_PAGE[kind]);
 
@@ -48,10 +48,10 @@ const DIFF_PAGE: Record<DiffRow["kind"], PageId> = {
   priorities: "budget", vendor_stage: "vendors", checklist: "vendors", task_dep: "tasks",
   task_due: "tasks", task_status: "tasks",
   sub_event: "schedule", block: "schedule",
-  diet: "event", signup: "event", rsvp: "event", wishlist: "event", permit: "event", sponsor: "event",
+  diet: "event", signup: "event", rsvp: "guests", wishlist: "event", permit: "event", sponsor: "event",
   event: "overview", basics: "overview",
   budget_removed: "budget", task_new: "tasks", idea: "ideas",
-  guest: "guests", household: "guests", join: "guests", gift: "event",
+  guest: "guests", household: "guests", join: "guests", gift: "event", activity: "event",
 };
 
 /** The pages a change touched, in nav order, leaving out `current` (the page already on screen). */
