@@ -1,9 +1,11 @@
 "use client";
-// First run (no saved plans in this browser): plan your own event, or explore one of the sample plans.
+// First run (no saved plans in this browser): plan your own event, explore one of the sample plans, or sign in.
 // Existing users never see this; they go straight to their saved plan.
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Cake, CheckCircle2, Heart, Megaphone, PartyPopper, Sparkles, type LucideIcon } from "lucide-react";
+import { ArrowRight, Cake, CheckCircle2, Heart, LogIn, Megaphone, PartyPopper, Sparkles, type LucideIcon } from "lucide-react";
+import { SIGNIN_PATH } from "@/signin";
 import { TEMPLATES, templateLabel, type TemplateId } from "@/config/event-templates";
 import { pageTitle } from "@/routes";
 import type { SetupInputRaw } from "@/setup";
@@ -27,6 +29,11 @@ export default function Welcome({ onCreate, onSample }: { onCreate: (s: SetupInp
         <div className="mx-auto flex max-w-5xl items-center gap-2.5 px-4 py-3">
           <div aria-hidden="true" className="logo-tile grid h-9 w-9 shrink-0 place-items-center rounded-xl shadow-sm"><PartyPopper size={18} /></div>
           <p className="text-sm font-semibold uppercase tracking-wider text-ink-muted">Utsav Co-Pilot</p>
+          {/* Signing in is optional: it keeps a cloud copy of the plan. Setting up and the samples work without it. */}
+          <Link href={SIGNIN_PATH} data-testid="welcome-signin"
+            className="ml-auto flex min-h-11 items-center gap-1.5 whitespace-nowrap rounded-lg border border-line-strong bg-surface px-3 text-sm font-medium text-sand-800 hover:bg-sand-100">
+            <LogIn size={16} aria-hidden="true" className="text-brand-700" /> Sign in
+          </Link>
         </div>
       </header>
       <main id="main" tabIndex={-1} data-testid="welcome" className="mx-auto max-w-5xl px-4 py-6 focus-visible:outline-none sm:py-10">

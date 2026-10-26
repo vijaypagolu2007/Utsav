@@ -44,19 +44,44 @@ for (const width of [1280, 375]) {
     await expect(dlg).toBeVisible();
     const [res] = await Promise.all([page.waitForResponse(r => r.url().endsWith("/api/events") && r.request().method() === "POST"), dlg.getByTestId("publish-guest-links").click()]);
     expect(res.status()).toBe(201);
-    const pub = dlg.getByTestId("public-guest-link");
-    await expect(pub).toBeVisible();
-    const url = await pub.inputValue();
-    expect(url).toMatch(/\/guest\/[A-Za-z0-9_-]+$/);
-    await expect(dlg.locator('input[data-testid^="invite-"]').first()).toHaveValue(/#k=/);
+    // v8 Part 1d: one link only, the RSVP link, with Copy, WhatsApp and a QR toggle. No public itinerary field.
+    const rsvp = dlg.getByTestId("rsvp-guest-link");
+    await expect(rsvp).toBeVisible();
+    await expect(rsvp).toHaveAccessibleName("RSVP link");
+    const url = await rsvp.inputValue();
+    expect(url).toMatch(/\/guest\/[A-Za-z0-9_-]+#k=[A-Za-z0-9_-]+$/);
+    await expect(dlg.getByTestId("public-guest-link")).toHaveCount(0);
+    await expect(dlg.getByTestId("visibility-summary")).toHaveCount(0);
+    await expect(dlg.getByRole("textbox")).toHaveCount(1);
+    await expect(dlg.getByTestId("share-intro")).toContainText("Share this one link with everyone");
+    await expect(dlg.getByTestId("share-intro")).toContainText("Guests page");
     await expect(btn).toContainText("live");
-    // The link really serves the public projection.
-    const id = url.split("/guest/")[1]!;
+    // WhatsApp opens a chat picker with the invitation and this exact link filled in.
+    const wa = new URL((await dlg.getByTestId("share-wa").getAttribute("href"))!);
+    expect(wa.origin + wa.pathname).toBe("https://wa.me/");
+    expect(wa.searchParams.get("text")).toContain(url);
+    await expect(dlg.getByTestId("share-wa")).toHaveAttribute("rel", /noopener/);
+    // The QR is behind a disclosure button that says whether it is open.
+    const qrBtn = dlg.getByTestId("share-qr-toggle");
+    await expect(qrBtn).toHaveAttribute("aria-expanded", "false");
+    await expect(dlg.getByTestId("share-qr")).toHaveCount(0);
+    await qrBtn.click();
+    await expect(qrBtn).toHaveAttribute("aria-expanded", "true");
+    await expect(dlg.getByTestId("share-qr")).toBeVisible();
+    await expect(dlg.getByRole("img", { name: /QR code for the RSVP link/ })).toBeVisible();
+    // 44px targets for every control in the dialog.
+    for (const b of await dlg.locator("button, a").all()) {
+      const box = await b.boundingBox();
+      if (box) expect(box.height, await b.textContent() ?? "").toBeGreaterThanOrEqual(44);
+    }
+    expect(await axe(page), `Guest links dialog ${width}px (light, QR open)`).toEqual([]);
+    // The old public itinerary URL (no #k=) still serves the read-only projection.
+    const id = url.split("/guest/")[1]!.split("#")[0]!;
     expect((await request.get(`/api/events/${id}/public`)).status()).toBe(200);
     // Copy gives feedback (clipboard permission granted here; the no-clipboard fallback has its own test).
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-    await dlg.getByRole("button", { name: "Copy Public itinerary (anyone) link" }).click();
-    await expect(dlg.getByRole("button", { name: "Copy Public itinerary (anyone) link" })).toContainText("Copied");
+    await dlg.getByRole("button", { name: "Copy RSVP link" }).click();
+    await expect(dlg.getByRole("button", { name: "Copy RSVP link" })).toContainText("Copied");
     await page.keyboard.press("Escape");
     await expect(dlg).toBeHidden();
     await expect(btn).toBeFocused();
@@ -68,11 +93,11 @@ test("Guest links: Copy still works without the async clipboard API (plain-http 
   await page.reload();
   await page.getByTestId("open-guest-links").click();
   await page.getByTestId("publish-guest-links").click();
-  const copy = page.getByRole("button", { name: "Copy Public itinerary (anyone) link" });
+  const copy = page.getByRole("button", { name: "Copy RSVP link" });
   await copy.click();
   // Either execCommand copied it, or the link is left selected with a Ctrl+C hint linked to the field. Never silence.
   await expect(page.getByText(/Copied|press Ctrl\+C/).first()).toBeVisible();
-  const field = page.getByTestId("public-guest-link");
+  const field = page.getByTestId("rsvp-guest-link");
   if (await page.getByText(/press Ctrl\+C/).count()) await expect(field).toHaveAccessibleDescription(/press Ctrl\+C/);
 });
 
@@ -292,7 +317,7 @@ test("guest view and the public guest page: no edit controls, no money", async (
   await page.getByRole("button", { name: "Organizer" }).click();
   await page.getByTestId("open-guest-links").click();
   await page.getByTestId("publish-guest-links").click();
-  const url = await page.locator('input[data-testid^="invite-"]').first().inputValue();
+  const url = await page.getByTestId("rsvp-guest-link").inputValue();
   const ctx = await browser.newContext();
   const g = await ctx.newPage();
   await g.goto(url);

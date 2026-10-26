@@ -20,7 +20,7 @@ type Props = {
   messages: ChatMsg[]; busy: boolean; onSend: (t: string) => void;
   onApprove: (msgId: string, a: UIAction) => void; onReject: (msgId: string, a: UIAction) => void;
   mode: "gemini" | "offline" | null; forceOffline: boolean; setForceOffline: (v: boolean) => void; plan: AgentState;
-  onScan: (i: ScanInput) => void; role: Role; actingGuestName: string | null;
+  onScan: (i: ScanInput) => void; role: Role; actingEntryName: string | null;
   /** Rendered inside the Co-Pilot drawer: its heading id, a close action and the latest result to announce. */
   titleId: string; onClose: () => void; announcement: string;
   /** Other pages the latest change touched (the dashboard behind the drawer only shows the current one). */
@@ -38,11 +38,13 @@ function StatusPill({ a }: { a: UIAction }) {
 export function DiffCard({ a, onApprove, onReject }: { a: Extract<UIAction, { kind: "batch" }>; onApprove: () => void; onReject: () => void }) {
   const pending = a.status === "pending";
   const isQuote = a.batch.commands.some(c => c.op === "upsert_vendor_quote");
+  // v8 Part 0c: a delete_event card (always Tier 2). Approve opens the app's own confirm; nothing is deleted before that.
+  const isDelete = a.batch.commands.some(c => c.op === "delete_event");
   return (
-    <div data-testid={a.counterOffer ? "counter-offer-card" : "diff-card"} className={`rounded-xl border ${a.tier === 0 ? "border-emerald-200 bg-emerald-50/40" : "border-amber-200 bg-amber-50/40"} p-3`}>
+    <div data-testid={a.counterOffer ? "counter-offer-card" : "diff-card"} data-op={isDelete ? "delete_event" : undefined} className={`rounded-xl border ${a.tier === 0 ? "border-emerald-200 bg-emerald-50/40" : "border-amber-200 bg-amber-50/40"} p-3`}>
       <div className="flex items-center gap-2">
         {a.tier === 0 ? <ShieldCheck size={14} className="text-emerald-600" /> : <ShieldAlert size={14} className="text-amber-600" />}
-        <span className="text-xs font-semibold uppercase tracking-wide text-sand-600">Tier {a.tier} · {a.counterOffer ? "Counter-offer" : TIER_LABEL[a.tier]}</span>
+        <span className="text-xs font-semibold uppercase tracking-wide text-sand-600">Tier {a.tier} · {a.counterOffer ? "Counter-offer" : isDelete ? "Delete event: needs your approval" : TIER_LABEL[a.tier]}</span>
         <span className="ml-auto"><StatusPill a={a} /></span>
       </div>
       <div className="mt-1 text-sm font-medium text-sand-800">{a.batch.summary}</div>
@@ -74,7 +76,7 @@ export function DiffCard({ a, onApprove, onReject }: { a: Extract<UIAction, { ki
       {a.diff.cascadedTasks > 0 && <div className="mt-1.5 text-xs text-peacock-700">{a.diff.cascadedTasks} task due date{a.diff.cascadedTasks > 1 ? "s" : ""} cascaded</div>}
       {pending && a.tier > 0 && (
         <div className="mt-2 flex gap-2">
-          <button type="button" onClick={onApprove} className="flex min-h-10 flex-1 items-center justify-center gap-1 rounded-lg bg-emerald-700 px-2 py-1.5 text-sm font-semibold text-white hover:bg-emerald-800"><Check size={13} /> {isQuote ? "Approve & Update Budget" : "Approve & Commit"}</button>
+          <button type="button" onClick={onApprove} className="flex min-h-10 flex-1 items-center justify-center gap-1 rounded-lg bg-emerald-700 px-2 py-1.5 text-sm font-semibold text-white hover:bg-emerald-800"><Check size={13} /> {isQuote ? "Approve & Update Budget" : isDelete ? "Approve, then confirm" : "Approve & Commit"}</button>
           <button type="button" onClick={onReject} className="flex min-h-10 items-center justify-center gap-1 rounded-lg border border-sand-500 bg-white px-3 py-1.5 text-sm font-medium text-sand-800 hover:bg-sand-100"><X size={13} /> Reject</button>
         </div>
       )}
@@ -198,7 +200,7 @@ function ActionView({ a, msgId, onApprove, onReject }: { a: UIAction; msgId: str
   }
 }
 
-export default function ChatSidebar({ messages, busy, onSend, onApprove, onReject, mode, forceOffline, setForceOffline, plan, onScan, role, actingGuestName, titleId, onClose, announcement, elsewhere = [] }: Props) {
+export default function ChatSidebar({ messages, busy, onSend, onApprove, onReject, mode, forceOffline, setForceOffline, plan, onScan, role, actingEntryName, titleId, onClose, announcement, elsewhere = [] }: Props) {
   const guest = role === "guest";
   const sample = SAMPLE_QUOTES.find(q => q.archetype === plan.event.eventType) ?? SAMPLE_QUOTES[0];
   const [input, setInput] = useState("");
@@ -217,7 +219,7 @@ export default function ChatSidebar({ messages, busy, onSend, onApprove, onRejec
         <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white ${guest ? "bg-brand-700" : "bg-maroon-800"}`}>{guest ? <Ticket size={16} /> : <Bot size={16} />}</div>
         <div className="min-w-0 flex-1 leading-tight">
           <h2 id={titleId} className="text-base font-semibold">{title}</h2>
-          <p className="text-sm text-sand-600">{guest ? `Read-only + RSVP assistant${actingGuestName ? ` · you are ${actingGuestName}` : ""}` : "Gemini proposes · reducer computes · you approve"}</p>
+          <p className="text-sm text-sand-600">{guest ? `Read-only + RSVP assistant${actingEntryName ? ` · you are ${actingEntryName}` : ""}` : "Gemini proposes · reducer computes · you approve"}</p>
         </div>
         <button type="button" onClick={onClose} data-drawer-close aria-label={`Close ${title}`} title={`Close ${title} (Esc)`}
           className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-sand-700 hover:bg-sand-100 hover:text-sand-900"><X size={20} aria-hidden="true" /></button>

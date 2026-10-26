@@ -1,9 +1,17 @@
 "use client";
 import { useEffect, useId, useRef, useState } from "react";
-import { Check, Copy, Link2, RefreshCw, X } from "lucide-react";
+import { Check, Copy, Link2, MessageCircle, QrCode, RefreshCw, X } from "lucide-react";
+import type { AgentState } from "@/schema";
+import { privateLink, rsvpMessage, waLink } from "@/invites";
+import QrImage from "./QrImage";
 import type { ShareInfo, ShareStatus } from "./useSharedEvent";
 
-type Props = { open: boolean; onClose: () => void; share: ShareInfo | null; status: ShareStatus; onPublish: () => void; onSync: () => void; onForget: () => void; visibility: { public: number; total: number } };
+// v8 Part 1d: one link only. The dialog shares the event's RSVP link (Copy, WhatsApp, QR); the old public itinerary
+// URL (/guest/<id> without #k=) still works read-only for anyone who has it, but the dialog no longer hands it out.
+type Props = { open: boolean; onClose: () => void; share: ShareInfo | null; status: ShareStatus; onPublish: () => void; onSync: () => void; onForget: () => void; plan: AgentState };
+
+/** Every control in this dialog is at least 44px tall. */
+const btn = "flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-3 text-sm font-medium text-sand-800 hover:bg-sand-100";
 
 /**
  * Copy to the clipboard. navigator.clipboard only exists on secure origins (https or localhost), so a LAN address
@@ -19,31 +27,46 @@ async function copyText(url: string, field: HTMLInputElement | null): Promise<bo
   try { return document.execCommand("copy"); } catch { return false; }
 }
 
-function CopyRow({ label, url, testId }: { label: string; url: string; testId?: string }) {
+function RsvpLink({ url, plan }: { url: string; plan: AgentState }) {
   const [state, setState] = useState<"idle" | "copied" | "manual">("idle");
+  const [showQr, setShowQr] = useState(false);
   const field = useRef<HTMLInputElement>(null);
   const hintId = useId();
+  const fieldId = useId();
+  const qrId = useId();
   const copy = async () => {
     const ok = await copyText(url, field.current);
     setState(ok ? "copied" : "manual");
     if (ok) setTimeout(() => setState("idle"), 1500);
   };
   return (
-    <li className="py-1.5">
-      <div className="flex items-end gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="text-xs font-medium text-sand-700">{label}</div>
-          <input ref={field} readOnly value={url} data-testid={testId} aria-label={`${label} link`} onFocus={e => e.currentTarget.select()}
-            aria-describedby={state === "manual" ? hintId : undefined}
-            className="h-9 w-full truncate rounded border border-line-strong bg-surface-muted px-2 font-mono text-xs text-sand-800 max-md:h-11" />
-        </div>
-        <button type="button" onClick={() => void copy()}
-          className="flex h-9 shrink-0 items-center gap-1 rounded-lg border border-line-strong bg-surface px-2.5 text-xs font-medium text-sand-800 hover:bg-sand-100 max-md:h-11" aria-label={`Copy ${label} link`}>
-          {state === "copied" ? <Check size={14} aria-hidden="true" className="text-emerald-700" /> : <Copy size={14} aria-hidden="true" />} <span aria-live="polite">{state === "copied" ? "Copied" : "Copy"}</span>
+    <div data-testid="share-rsvp">
+      <label htmlFor={fieldId} className="text-xs font-semibold uppercase tracking-wide text-ink-muted">RSVP link</label>
+      <input id={fieldId} ref={field} readOnly value={url} data-testid="rsvp-guest-link" onFocus={e => e.currentTarget.select()}
+        aria-describedby={state === "manual" ? hintId : undefined}
+        className="mt-1 h-11 w-full truncate rounded-lg border border-line-strong bg-surface-muted px-2 font-mono text-xs text-sand-800" />
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button type="button" onClick={() => void copy()} data-testid="share-copy" className={btn} aria-label="Copy RSVP link">
+          {state === "copied" ? <Check size={15} aria-hidden="true" className="text-emerald-700" /> : <Copy size={15} aria-hidden="true" />} <span aria-live="polite">{state === "copied" ? "Copied" : "Copy"}</span>
+        </button>
+        <a href={waLink("", rsvpMessage(plan, url))} target="_blank" rel="noopener noreferrer" data-testid="share-wa"
+          className="flex min-h-11 items-center gap-1.5 rounded-lg bg-emerald-700 px-3 text-sm font-semibold text-white hover:bg-emerald-800">
+          <MessageCircle size={15} aria-hidden="true" />Share on WhatsApp<span className="sr-only"> (opens WhatsApp)</span>
+        </a>
+        <button type="button" onClick={() => setShowQr(v => !v)} aria-expanded={showQr} aria-controls={qrId} data-testid="share-qr-toggle" className={btn}>
+          <QrCode size={15} aria-hidden="true" />{showQr ? "Hide QR" : "Show QR"}
         </button>
       </div>
       {state === "manual" && <p id={hintId} role="status" className="mt-1 text-xs text-ink-muted">This browser blocked copying here. The link is selected: press Ctrl+C (Cmd+C on a Mac) to copy it.</p>}
-    </li>
+      <div id={qrId} hidden={!showQr} className="mt-3">
+        {showQr && (
+          <figure className="m-0 inline-block">
+            <QrImage value={url} label={`QR code for the RSVP link to ${plan.event.title}`} testId="share-qr" className="h-40 w-40 rounded-lg ring-1 ring-line" />
+            <figcaption className="mt-1 text-center text-xs text-ink-muted">Scan to RSVP</figcaption>
+          </figure>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -53,7 +76,7 @@ export default function ShareDialog(props: Props) {
   return <ShareDialogOpen {...props} />;
 }
 
-function ShareDialogOpen({ onClose, share, status, onPublish, onSync, onForget, visibility }: Props) {
+function ShareDialogOpen({ onClose, share, status, onPublish, onSync, onForget, plan }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const downOnBackdrop = useRef(false);
   useEffect(() => {
@@ -75,15 +98,11 @@ function ShareDialogOpen({ onClose, share, status, onPublish, onSync, onForget, 
         <div className="mb-3 flex items-center gap-2">
           <Link2 size={18} aria-hidden="true" className="text-brand-700" />
           <h2 id="share-title" className="text-base font-semibold">Guest links</h2>
-          <button type="button" onClick={onClose} className="ml-auto grid h-9 w-9 place-items-center rounded-lg text-sand-700 hover:bg-sand-100 max-md:h-11 max-md:w-11" aria-label="Close" title="Close (Esc)"><X size={18} aria-hidden="true" /></button>
+          <button type="button" onClick={onClose} className="ml-auto grid h-11 w-11 place-items-center rounded-lg text-sand-700 hover:bg-sand-100" aria-label="Close" title="Close (Esc)"><X size={18} aria-hidden="true" /></button>
         </div>
-        <p className="mb-3 text-xs text-ink-muted">
-          Guests see only the itinerary, venues, dress codes and their own household&apos;s RSVPs. Budgets, vendors, tasks and other guests stay private.
-          Each household link carries its own secret after the <code>#</code>, which browsers never send to the server.
-        </p>
-        <p className="mb-3 rounded-lg bg-surface-muted p-2 text-xs text-ink-muted" data-testid="visibility-summary">
-          {visibility.public} of {visibility.total} sub-events are public. Private ones appear only on the links of households invited to them.
-          {visibility.public === 0 && " The public itinerary link will be empty until you mark a sub-event Public on the timeline."}
+        <p className="mb-3 text-sm text-ink-muted" data-testid="share-intro">
+          Share this one link with everyone. Each family fills in one short form and sees the schedule, venues and dress codes,
+          never your budget, vendors or other guests. The RSVP dashboard is on the Guests page.
         </p>
         {status.state === "unconfigured" && (
           <div className="mb-3 space-y-1 rounded-lg bg-amber-50 p-3 text-xs text-amber-900 ring-1 ring-inset ring-amber-300" role="alert" data-testid="share-unconfigured">
@@ -95,20 +114,19 @@ function ShareDialogOpen({ onClose, share, status, onPublish, onSync, onForget, 
         {status.state === "error" && <div className="mb-3 rounded-lg bg-red-50 p-2 text-xs text-red-700" role="alert">{status.message}</div>}
         {!share ? (
           <button type="button" onClick={onPublish} disabled={status.state === "publishing"} data-testid="publish-guest-links"
-            className="min-h-10 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-hover disabled:opacity-50 max-md:min-h-11">
-            {status.state === "publishing" ? "Publishing…" : "Publish & create guest links"}
+            className="min-h-11 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-hover disabled:opacity-50">
+            {status.state === "publishing" ? "Publishing…" : "Publish & create the RSVP link"}
           </button>
         ) : (
           <>
             <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
               <span data-testid="share-sync-status" role="status">{status.state === "syncing" ? "Syncing…" : status.state === "synced" ? "Synced" : status.state === "error" ? "Not synced" : "Shared"} · version {share.version}</span>
-              <button type="button" onClick={onSync} className="flex min-h-9 items-center gap-1 rounded-lg border border-line-strong bg-surface px-2.5 py-0.5 text-sand-800 hover:bg-sand-100 max-md:min-h-11"><RefreshCw size={14} aria-hidden="true" /> Sync now</button>
+              <button type="button" onClick={onSync} className="flex min-h-11 items-center gap-1 rounded-lg border border-line-strong bg-surface px-3 text-sand-800 hover:bg-sand-100"><RefreshCw size={14} aria-hidden="true" /> Sync now</button>
             </div>
-            <ul className="divide-y divide-line-soft">
-              <CopyRow label="Public itinerary (anyone)" url={`${origin}/guest/${share.eventId}`} testId="public-guest-link" />
-              {share.invites.map(i => <CopyRow key={i.householdId} label={`${i.label} (RSVP link)`} url={`${origin}/guest/${share.eventId}#k=${i.token}`} testId={`invite-${i.householdId}`} />)}
-            </ul>
-            <button type="button" onClick={onForget} className="mt-3 min-h-9 text-xs text-ink-muted underline max-md:min-h-11">Stop syncing on this device</button>
+            {share.rsvpToken
+              ? <RsvpLink url={privateLink(origin, share.eventId, share.rsvpToken)} plan={plan} />
+              : <p className="text-sm text-ink-muted" data-testid="share-rsvp-missing">This event was shared before the RSVP link existed. Press Sync now to make it.</p>}
+            <button type="button" onClick={onForget} className="mt-3 min-h-11 text-xs text-ink-muted underline">Stop syncing on this device</button>
           </>
         )}
       </div>

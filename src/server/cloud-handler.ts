@@ -36,6 +36,9 @@ export type CloudDeps = {
 };
 
 export const SaveRequest = z.object({ plan: z.unknown(), baseVersion: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER) }).strict();
+/** v8 Part 0c: the tombstone write. No plan: the stored one is kept, so Restore (a normal save) works on any device. */
+export const TombstoneRequest = z.object({ deleted: z.literal(true), baseVersion: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER) }).strict();
+const EVENT_ID = /^[A-Za-z0-9_.:-]{1,120}$/;
 
 const NOT_CONFIGURED = () => fail(503, "cloud_not_configured", "Cloud save isn't set up on this server. Your plans are still saved on this device.");
 const UNAUTHORIZED = () => fail(401, "unauthorized", "Sign in again to use cloud save");
@@ -70,7 +73,7 @@ async function authenticate(request: Request, deps: CloudDeps): Promise<Authed> 
   return { ok: true, uid, caller: { uid, idToken: token }, repo: deps.repo };
 }
 
-const docBody = (planKey: string, d: CloudDoc, plan: AgentState) => ({ planKey, version: d.version, updatedAt: d.updatedAt, plan });
+const docBody = (planKey: string, d: CloudDoc, plan: AgentState) => ({ planKey, version: d.version, updatedAt: d.updatedAt, plan, ...(d.deletedAt ? { deletedAt: d.deletedAt } : {}) });
 
 /** A stored copy that no longer parses is treated as absent (never served half-parsed). */
 function parseStored(d: CloudDoc | null): { doc: CloudDoc; plan: AgentState } | null {
@@ -124,6 +127,7 @@ export async function handleCloudSave(request: Request, planKey: string, deps: C
   if (deps.store) { const rl = await limited(deps.store, "cloudWrite", a.uid); if (rl) return rl; }
   const body = await readJsonLimited(request, CLOUD_MAX_BODY_BYTES);
   if (!body.ok) return body.result;
+  if (body.value && typeof body.value === "object" && "deleted" in body.value) return tombstone(a, planKey, body.value, deps);
   const req = SaveRequest.safeParse(body.value);
   if (!req.success) return fail(400, "invalid_request", "Expected { plan, baseVersion }", { issues: issuesOf(req.error.issues) });
   const p = AgentState.safeParse(req.data.plan);
@@ -144,5 +148,59 @@ export async function handleCloudSave(request: Request, planKey: string, deps: C
       });
     }
     return ok({ planKey, version: w.version, updatedAt: w.updatedAt });
+  });
+}
+
+const conflictWith = (planKey: string, current: CloudDoc | null, code = "version_conflict", message = "The cloud copy changed since this device last saved it") => {
+  const cur = parseStored(current);
+  return fail(409, code, message, { current: cur ? docBody(planKey, cur.doc, cur.plan) : null, currentVersion: current?.version ?? 0 });
+};
+
+/**
+ * PUT /api/cloud/plans/:planKey { deleted: true, baseVersion } → 200 { version, updatedAt, deletedAt }. Marks the copy
+ * deleted (a tombstone, version + 1) so other devices drop their copy instead of uploading it again. Compare-and-set
+ * like a save; deleting an already deleted copy at its current version changes nothing.
+ */
+async function tombstone(a: Extract<Authed, { ok: true }>, planKey: string, raw: unknown, deps: CloudDeps): Promise<HandlerResult> {
+  const req = TombstoneRequest.safeParse(raw);
+  if (!req.success) return fail(400, "invalid_request", "Expected { deleted: true, baseVersion }", { issues: issuesOf(req.error.issues) });
+  const updatedAt = (deps.now?.() ?? new Date()).toISOString();
+  return guarded(deps, "tombstone", async () => {
+    const cur = await a.repo.get(a.caller, planKey);
+    if (!cur) return fail(404, "not_found", "No cloud copy of this plan");
+    if (cur.version !== req.data.baseVersion) return conflictWith(planKey, cur);
+    if (cur.deletedAt) return ok({ planKey, version: cur.version, updatedAt: cur.updatedAt, deletedAt: cur.deletedAt });
+    const w = await a.repo.cas(a.caller, planKey, cur.version, { planJson: cur.planJson, updatedAt, title: cur.title, eventType: cur.eventType, deletedAt: updatedAt });
+    if (!w.ok) return conflictWith(planKey, w.current);
+    return ok({ planKey, version: w.version, updatedAt: w.updatedAt, deletedAt: updatedAt });
+  });
+}
+
+/**
+ * DELETE /api/cloud/plans/:planKey?baseVersion=n&eventId=… → 200 { deleted: true } ("Delete forever"). Owner-only like
+ * every cloud route, and only for a tombstoned copy at that version (and of that event, when named): a live copy, or a
+ * newer event that took the slot since, is never removed (409).
+ */
+export async function handleCloudDelete(request: Request, planKey: string, deps: CloudDeps): Promise<HandlerResult> {
+  const a = await authenticate(request, deps); if (!a.ok) return a.result;
+  if (!PLAN_KEY.test(planKey)) return fail(400, "invalid_plan_key", "Unknown plan");
+  if (deps.store) { const rl = await limited(deps.store, "cloudWrite", a.uid); if (rl) return rl; }
+  const q = new URL(request.url).searchParams;
+  const rawVersion = q.get("baseVersion") ?? "";
+  const baseVersion = /^[1-9]\d{0,15}$/.test(rawVersion) ? Number(rawVersion) : NaN;
+  const eventId = q.get("eventId");
+  if (!Number.isSafeInteger(baseVersion) || (eventId !== null && !EVENT_ID.test(eventId))) return fail(400, "invalid_request", "Expected ?baseVersion=<n>[&eventId=<id>]");
+  return guarded(deps, "delete", async () => {
+    const cur = await a.repo.get(a.caller, planKey);
+    if (!cur) return fail(404, "not_found", "No cloud copy of this plan");
+    if (!cur.deletedAt) return conflictWith(planKey, cur, "not_deleted", "Only a deleted event can be deleted forever");
+    if (cur.version !== baseVersion) return conflictWith(planKey, cur);
+    if (eventId !== null) {
+      const s = parseStored(cur);
+      if (s && s.plan.event.id !== eventId) return conflictWith(planKey, cur, "different_event", "The cloud copy is a different event now");
+    }
+    const w = await a.repo.remove(a.caller, planKey, baseVersion);
+    if (!w.ok) return w.current ? conflictWith(planKey, w.current) : ok({ planKey, deleted: true });
+    return ok({ planKey, deleted: true });
   });
 }

@@ -1,6 +1,6 @@
 // 3-tier trust model. Tier 0 auto-applies, Tier 1 needs a dry-run diff approval, Tier 2 is an outbound draft
 // that a human sends. The tier is decided deterministically from the commands, never by the LLM.
-import { V6_OPS, type Command } from "./commands";
+import { GUEST_LIST_OPS, RSVP_ORGANIZER_OPS, V6_OPS, type Command } from "./commands";
 
 export type TrustTier = 0 | 1 | 2;
 /** Budget moves at or above this need approval: ₹25,000. */
@@ -30,6 +30,20 @@ export function commandTier(c: Command): TrustTier {
     case "remove_vendor": return 1;
     // The idea board itself moves no money or dates.
     case "add_ideas": case "save_idea": case "dismiss_idea": return 0;
+    // v8 Part 0c: deleting the event is never automatic. The card needs Approve, then the app's own confirm.
+    case "delete_event": return 2;
+    // v8 Part 1: adding and editing people and gifts is reversible with Undo (Tier 0). Removing someone, a bulk import
+    // (many people at once) and declining a join request show a dry-run card first. Approving a join request adds a
+    // household, the same as add_household. request_join is a guest's own pending request: it changes nothing visible.
+    case "add_household": case "update_household": case "add_guest": case "update_guest": case "approve_join_request": return 0;
+    case "remove_household": case "remove_guest": case "import_guests": case "reject_join_request": return 1;
+    case "add_wishlist_item": case "update_wishlist_item": case "set_wishlist_surprise": return 0;
+    case "remove_wishlist_item": return 1;
+    case "unclaim_wishlist_item": case "request_join": return 0;
+    // v8 Part 1c: a guest's own RSVP is Tier 0. Marking a VIP or restoring an RSVP is undoable (Tier 0); removing one,
+    // merging two, and changing the close date or the form (which every guest sees) show a dry-run card first.
+    case "submit_rsvp_entry": case "set_rsvp_vip": case "restore_rsvp_entry": return 0;
+    case "remove_rsvp_entry": case "merge_rsvp_entries": case "set_rsvp_settings": return 1;
     case "set_task_status": case "set_rsvp": case "shift_block": case "set_item_lock":
     case "claim_wishlist_item": case "set_permit_status":
       return 0;
@@ -43,11 +57,11 @@ export function batchTier(commands: Command[]): TrustTier {
 
 /**
  * The tier an AI proposal is shown at. Same as batchTier, except that a batch with any v6 op (priorities, vendors,
- * dependencies) is never auto-applied for the AI: the organiser approves it on a card, even when its own tier is 0.
+ * dependencies), a v8 guest-list / wishlist op or a v8 Part 1c RSVP-list op is never auto-applied for the AI: the organiser approves it on a card, even when its own tier is 0.
  */
 export function agentBatchTier(commands: Command[]): TrustTier {
   const t = batchTier(commands);
-  return commands.some(c => V6_OPS.has(c.op)) ? (Math.max(1, t) as TrustTier) : t;
+  return commands.some(c => V6_OPS.has(c.op) || GUEST_LIST_OPS.has(c.op) || RSVP_ORGANIZER_OPS.has(c.op)) ? (Math.max(1, t) as TrustTier) : t;
 }
 
 export const TIER_LABEL: Record<TrustTier, string> = {

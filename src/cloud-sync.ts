@@ -5,7 +5,9 @@
 // devices. When the two differ and it isn't obvious which is newer, the organizer chooses; nothing is merged silently.
 import { AgentState } from "./schema";
 
-export type CloudCopy = { version: number; updatedAt: string; plan: AgentState };
+export type CloudCopy = { version: number; updatedAt: string; plan: AgentState;
+  /** v8 Part 0c: set when the organizer deleted the event (a tombstone: the plan is kept so it can be restored). */
+  deletedAt?: string | null };
 /** What this device last agreed with the cloud for one (user, slot): the version and a fingerprint of that plan. */
 export type SyncBase = { version: number; hash: string };
 
@@ -15,7 +17,14 @@ export type SyncStatus =
   | { state: "saving" }
   | { state: "saved"; at: number }
   | { state: "offline" }
+  /** v8 Part 0b: an untouched sample with no cloud copy, kept on this device only (see my-events.ts mayCreateCloudCopy). */
+  | { state: "sample" }
   | { state: "choose"; cloud: CloudCopy; reason: "differs" | "conflict" }
+  /**
+   * v8 Part 0c: a deletion and edits the other side never saw (trash.ts decideTombstoneSync "choose"). deleted_elsewhere:
+   * deleted on another device, edited here. edited_elsewhere: deleted here while offline, edited on another device.
+   */
+  | { state: "choose_deleted"; cloud: CloudCopy; reason: "deleted_elsewhere" | "edited_elsewhere" }
   | { state: "error"; message: string };
 
 /** JSON with object keys sorted, so two equal plans serialise the same whatever order their keys were built in. */
@@ -68,7 +77,7 @@ export function decideOnSignIn(local: AgentState, cloud: CloudCopy | null, base:
 
 /** Autosave runs only while signed in, with nothing to decide, and when the plan differs from what the cloud holds. */
 export function shouldAutosave(status: SyncStatus, local: AgentState, base: SyncBase | null): boolean {
-  if (status.state === "signed_out" || status.state === "checking" || status.state === "choose" || status.state === "saving") return false;
+  if (status.state === "signed_out" || status.state === "checking" || status.state === "choose" || status.state === "choose_deleted" || status.state === "saving") return false;
   return !base || base.hash !== planHash(local);
 }
 
@@ -85,7 +94,9 @@ export function statusLabel(s: SyncStatus): string {
     case "saving": return "Saving…";
     case "saved": return "Saved to cloud";
     case "offline": return "Offline – saved on this device";
+    case "sample": return "Sample – not saved to your account";
     case "choose": return s.reason === "conflict" ? "Cloud copy changed elsewhere – choose a version" : "Cloud and device differ – choose a version";
+    case "choose_deleted": return s.reason === "deleted_elsewhere" ? "Deleted on another device – choose what to keep" : "Edited on another device after you deleted it – choose";
     case "error": return s.message;
   }
 }
@@ -107,7 +118,10 @@ function parseCopy(raw: unknown): CloudCopy | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
   const p = AgentState.safeParse(r.plan);
-  return p.success && Number.isInteger(r.version) ? { version: r.version as number, updatedAt: String(r.updatedAt ?? ""), plan: p.data } : null;
+  if (!p.success || !Number.isInteger(r.version)) return null;
+  const copy: CloudCopy = { version: r.version as number, updatedAt: String(r.updatedAt ?? ""), plan: p.data };
+  if (typeof r.deletedAt === "string" && r.deletedAt) copy.deletedAt = r.deletedAt;
+  return copy;
 }
 
 async function call(f: Fetch, path: string, token: string, init: RequestInit = {}): Promise<{ status: number; body: Record<string, unknown> } | null> {
@@ -141,6 +155,26 @@ export async function saveCloudCopy(planKey: string, token: string, plan: AgentS
   if (r!.status === 200) return { kind: "ok", version: Number(r!.body.version), updatedAt: String(r!.body.updatedAt ?? "") };
   if (r!.status === 409) return { kind: "conflict", current: parseCopy(r!.body.current), currentVersion: Number(r!.body.currentVersion) || 0 };
   return { kind: "error", message: String(r!.body.message ?? `Cloud save failed (${r!.status})`) };
+}
+
+/** v8 Part 0c: tombstone the cloud copy (the plan stays, so Restore works anywhere). Same compare-and-set as a save. */
+export async function tombstoneCloudCopy(planKey: string, token: string, baseVersion: number, f: Fetch = fetch): Promise<CloudApiResult> {
+  const r = await call(f, url(planKey), token, { method: "PUT", body: JSON.stringify({ deleted: true, baseVersion }) });
+  const c = common(r); if (c) return c;
+  if (r!.status === 200) return { kind: "ok", version: Number(r!.body.version), updatedAt: String(r!.body.updatedAt ?? "") };
+  if (r!.status === 404) return { kind: "copy", copy: null };
+  if (r!.status === 409) return { kind: "conflict", current: parseCopy(r!.body.current), currentVersion: Number(r!.body.currentVersion) || 0 };
+  return { kind: "error", message: String(r!.body.message ?? `Cloud delete failed (${r!.status})`) };
+}
+
+/** v8 Part 0c: "Delete forever": a real DELETE of a tombstoned copy (version- and event-checked by the server). */
+export async function deleteCloudCopy(planKey: string, token: string, baseVersion: number, eventId: string, f: Fetch = fetch): Promise<CloudApiResult> {
+  const q = new URLSearchParams({ baseVersion: String(baseVersion), eventId });
+  const r = await call(f, `${url(planKey)}?${q}`, token, { method: "DELETE" });
+  const c = common(r); if (c) return c;
+  if (r!.status === 200 || r!.status === 404) return { kind: "copy", copy: null };
+  if (r!.status === 409) return { kind: "conflict", current: parseCopy(r!.body.current), currentVersion: Number(r!.body.currentVersion) || 0 };
+  return { kind: "error", message: String(r!.body.message ?? `Cloud delete failed (${r!.status})`) };
 }
 
 // ---------- per-device memory of the last agreed version (localStorage, separate from the plan store) ----------

@@ -267,7 +267,8 @@ describe("planner option lists", () => {
   test("legacy and free-text diets still load and still save through the reducer", () => {
     const plan = AgentState.parse({ ...royalWedding, guests: royalWedding.guests.map((g, i) => (i === 0 ? { ...g, diet: ["halal", "nut allergy"] } : g)) });
     assert.deepEqual(plan.guests[0]!.diet, ["halal", "nut allergy"]);
-    const r = applyBatch(plan, { summary: "d", commands: [{ op: "set_guest_diet", guestId: plan.guests[0]!.id, diet: ["halal", "jain"] }] }, { role: "guest" });
+    // v8 Part 1c: diets are organizer-side now (guests pick a meal on the open RSVP form).
+    const r = applyBatch(plan, { summary: "d", commands: [{ op: "set_guest_diet", guestId: plan.guests[0]!.id, diet: ["halal", "jain"] }] }, { source: "ui" });
     assert.ok(r.ok);
   });
 
@@ -348,7 +349,7 @@ const hl = { ids: new Set<string>(), key: 0 };
 const organizerHtml = (id: TemplateId, plan = instantiateTemplate(id)) =>
   renderToStaticMarkup(createElement(ArchetypeCard, { template: getTemplate(id)!, plan, today: TODAY, commit: noop, highlight: hl, onAsk: () => {} }));
 const guestHtml = (id: TemplateId, plan = instantiateTemplate(id)) =>
-  renderToStaticMarkup(createElement(GuestMicrosite, { template: getTemplate(id)!, plan, today: TODAY, commit: noop, highlight: hl, actingGuestId: plan.guests[0]?.id ?? null, setActingGuestId: () => {} }));
+  renderToStaticMarkup(createElement(GuestMicrosite, { template: getTemplate(id)!, plan, today: TODAY, commit: noop, highlight: hl, actingEntryId: null, setActingEntryId: () => {} }));
 
 describe("generic event-type layout", () => {
   test("every section id a template can use has a component and declares its event types", () => {

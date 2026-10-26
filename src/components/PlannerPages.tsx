@@ -4,9 +4,10 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, CalendarRange, Clock, Lightbulb, ListChecks, MapPin, PartyPopper, Users, Wallet } from "lucide-react";
+import { ArrowRight, CalendarRange, Clock, Lightbulb, ListChecks, MapPin, PartyPopper, RotateCcw, Trash2, Users, Wallet } from "lucide-react";
 import { IDEA_KIND_LABEL } from "@/ideas";
 import IdeasBoard from "./IdeasBoard";
+import GuestsPageBody from "./GuestsPage";
 import SetupWizard from "./SetupWizard";
 import type { AgentState } from "@/schema";
 import { daysBetween, taskDueDate } from "@/commands";
@@ -45,8 +46,11 @@ function PageHeading({ page, heading, headingId, children }: { page: PageId; hea
 const Frame = ({ children }: { children: ReactNode }) => <div className="mx-auto max-w-[100rem] space-y-5">{children}</div>;
 
 // ---------------------------------------------------------------- Overview
-/** Event name and, for weddings, the couple: edited in place (Tier 0 renames through the reducer). */
-function EventDetails({ plan, commit }: { plan: AgentState; commit: Commit }) {
+/**
+ * Event name and, for weddings, the couple: edited in place (Tier 0 renames through the reducer). At the right end,
+ * "Delete event" (red, outlined) for every event; v8 Part 0d: samples too, with a secondary "Reset sample" before it.
+ */
+function EventDetails({ plan, commit, actions }: { plan: AgentState; commit: Commit; actions: { isSample: boolean; requestDelete: () => void; resetSample: () => void } }) {
   const ext = plan.event.ext;
   const couple = ext.type === "wedding" ? ext.partners : null;
   const setPartner = (i: 0 | 1) => (name: string) => couple && saveWith(commit, { summary: "Update the couple's names",
@@ -64,6 +68,18 @@ function EventDetails({ plan, commit }: { plan: AgentState; commit: Commit }) {
           <InlineEdit label="second partner's name" value={couple[1]} inputSize="w-40" onSave={setPartner(1)}><span className="font-medium text-ink">{couple[1] || "(not set)"}</span></InlineEdit>
         </span>
       )}
+      <span className="ml-auto flex flex-wrap justify-end gap-2 py-0.5">
+        {actions.isSample && (
+          <button type="button" onClick={actions.resetSample} data-testid="overview-reset-sample" title="Restore this sample as shipped (clears its history)"
+            className="flex min-h-9 items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-3 text-sm font-medium text-sand-800 hover:bg-sand-100 max-md:min-h-11 pointer-coarse:min-h-11">
+            <RotateCcw size={15} aria-hidden="true" /> Reset sample
+          </button>
+        )}
+        <button type="button" onClick={actions.requestDelete} data-testid="overview-delete-event" aria-haspopup="dialog"
+          className="flex min-h-9 items-center gap-1.5 rounded-lg border border-red-600 bg-surface px-3 text-sm font-semibold text-red-700 hover:bg-red-50 max-md:min-h-11 pointer-coarse:min-h-11">
+          <Trash2 size={15} aria-hidden="true" /> Delete event
+        </button>
+      </span>
     </div>
   );
 }
@@ -164,6 +180,7 @@ function EventSummary({ plan, today }: { plan: AgentState; today: string }) {
         </>
       ) : <p className="flex items-center gap-1.5 text-ink-muted"><Users size={15} aria-hidden="true" />No RSVPs to track yet ({plan.guests.length} on the guest list).</p>}
       {ext.type === "birthday" && <p className="tabular-nums text-ink-muted">Wishlist: {ext.wishlist.filter(w => w.claimedByGuestId).length} of {ext.wishlist.length} gifts claimed</p>}
+      {ext.type === "wedding" && ext.wishlist.length > 0 && <p className="tabular-nums text-ink-muted">Gift registry: {ext.wishlist.filter(w => w.claimedByGuestId).length} of {ext.wishlist.length} gifts claimed</p>}
       {ext.type === "community" && (
         <p className="tabular-nums text-ink-muted">
           Permits: {ext.permits.filter(p => p.status === "approved").length} of {ext.permits.length} approved · Sponsors: {ext.sponsors.filter(s => s.status === "committed" || s.status === "paid").length} of {ext.sponsors.length} committed
@@ -195,14 +212,14 @@ function IdeasSummary({ plan }: { plan: AgentState }) {
 }
 
 export function OverviewPage() {
-  const { plan, today, insights, template, commit, showInsight } = usePlanner();
+  const { plan, today, insights, template, commit, showInsight, eventActions } = usePlanner();
   return (
     <Frame>
       <section id="overview" aria-labelledby="overview-h" data-event-type={plan.event.eventType} className="festive-hero -mx-3 -mt-4 space-y-3 px-3 py-4 sm:mx-0 sm:mt-0 sm:rounded-2xl sm:p-5">
         <PageHeading page="overview" heading={plan.event.title} headingId="overview-h">
           <Chip tone={accentTone(template.accent)} icon={<MapPin size={13} />} className="capitalize">{plan.event.eventType} · {plan.event.city}</Chip>
         </PageHeading>
-        <EventDetails plan={plan} commit={commit} />
+        <EventDetails plan={plan} commit={commit} actions={eventActions} />
         <KpiStrip kpis={kpisFor("organizer", plan.event.eventType)} ctx={kpiContext(plan, today)} />
       </section>
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start">
@@ -253,13 +270,33 @@ export function EventPage() {
   return <Frame><PageHeading page="event" /><ArchetypeCard template={template} plan={plan} today={today} commit={commit} highlight={highlight} onAsk={ask} /></Frame>;
 }
 
+/** v8 Part 1: households, imports, private invite links, the group join link and the RSVP change log. */
+export function GuestsPage() {
+  return <Frame><PageHeading page="guests" /><section id="guests" aria-label="Guest list" tabIndex={-1} className="focus-visible:outline-offset-4"><GuestsPageBody /></section></Frame>;
+}
+
 export function IdeasPage() {
   return <Frame><PageHeading page="ideas" /><IdeasBoard /></Frame>;
 }
 
 /** "New plan": the same setup form as the first-run welcome, inside the planner shell. */
 export function SetupPage() {
-  const { createPlan } = usePlanner();
+  const { createPlan, eventActions } = usePlanner();
   const router = useRouter();
-  return <Frame><SetupWizard onCreate={createPlan} onCancel={() => router.push("/")} cancelLabel="Cancel" onDone={() => router.push("/")} /></Frame>;
+  return (
+    <Frame>
+      {/* v8 Part 0d: every event (samples too) was deleted: say so, and offer the samples back next to a new event. */}
+      {eventActions.noEvents && (
+        <div role="note" data-testid="no-events" className="rounded-2xl border border-line bg-surface p-4 shadow-sm sm:p-5">
+          <p className="text-lg font-semibold text-ink">You have no events right now</p>
+          <p className="mt-1 text-sm text-ink-muted">Start a new event below, bring back the three samples, or restore a deleted event from <span className="font-medium text-ink">Recently deleted</span> in the event menu (kept for 30 days).</p>
+          <button type="button" onClick={eventActions.restoreSamples} data-testid="setup-restore-samples"
+            className="mt-3 flex min-h-11 items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-4 text-sm font-semibold text-sand-800 hover:bg-sand-100">
+            <RotateCcw size={16} aria-hidden="true" className="text-peacock-700" /> Restore samples
+          </button>
+        </div>
+      )}
+      <SetupWizard onCreate={createPlan} onCancel={eventActions.noEvents ? undefined : () => router.push("/")} cancelLabel="Cancel" onDone={() => router.push("/")} />
+    </Frame>
+  );
 }

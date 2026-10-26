@@ -319,7 +319,8 @@ describe("Firestore REST repo (keyless, the caller's own token)", () => {
     assert.equal(patch.url.searchParams.get("currentDocument.exists"), "false");
     assert.equal(patch.auth, `Bearer ${TOKEN_A}`);
     const f = fs.docs.get("users/uid_A/plans/wedding")!.fields;
-    assert.deepEqual(Object.keys(f).sort(), [...CLOUD_DOC_FIELDS].sort());
+    // deletedAt (v8 Part 0c) is only written on a tombstone.
+    assert.deepEqual(Object.keys(f).sort(), [...CLOUD_DOC_FIELDS].filter(k => k !== "deletedAt").sort());
     assert.equal(f.version!.integerValue, "1");
     assert.equal(typeof f.plan!.stringValue, "string");
     assert.equal(f.updatedAt!.timestampValue, NOW.toISOString());
@@ -459,7 +460,7 @@ describe("configuration", () => {
     assert.equal(pkg.dependencies["firebase-admin"], undefined);
     assert.ok(pkg.dependencies.jose, "jose verifies ID tokens");
   });
-  test("firestore.rules: owner-only plans, exact fields, size cap, version + 1, same key pattern, no deletes, rest denied", () => {
+  test("firestore.rules: owner-only plans, exact fields, size cap, version + 1, same key pattern, owner-only deletes, rest denied", () => {
     const raw = readFileSync(new URL("../../firestore.rules", import.meta.url), "utf8");
     const rules = raw.replace(/\/\/.*$/gm, "");
     assert.match(rules, /rules_version = '2';/);
@@ -474,7 +475,8 @@ describe("configuration", () => {
     assert.match(rules, /allow update: if isOwner\(\) && validKey\(\) && validShape\(request\.resource\.data\)[\s\S]*?request\.resource\.data\.version == resource\.data\.version \+ 1;/);
     assert.ok(rules.includes(`planKey.matches('${PLAN_KEY.source}')`), "rules use the server's plan key pattern");
     assert.match(rules, /allow read: if isOwner\(\);/);
-    assert.match(rules, /allow delete: if false;/);
+    // v8 Part 0c: "Delete forever" (owner-only, valid key; the server sends it only for a tombstoned copy).
+    assert.match(rules, /allow delete: if isOwner\(\) && validKey\(\);/);
     assert.match(rules, /match \/\{document=\*\*\} \{\s*allow read, write: if false;\s*\}/);
     assert.doesNotMatch(rules, /if true|allow write: if isOwner|allow read, write: if isOwner/);
   });

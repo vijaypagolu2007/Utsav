@@ -1,7 +1,11 @@
 "use client";
 import { useEffect, useId, useRef, useState } from "react";
-import { AlertTriangle, Cloud, CloudOff, Laptop, LogIn, LogOut, RefreshCw } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { AlertTriangle, Cloud, CloudOff, Laptop, LayoutTemplate, LogIn, LogOut, RefreshCw } from "lucide-react";
 import { statusLabel, type SyncStatus } from "@/cloud-sync";
+import { signInHref } from "@/signin";
+import { unavailableText } from "./cloud-auth";
 import type { CloudSync } from "./useCloudSync";
 
 /** Short form for the header chip (below 640px the chip shrinks to an icon badge on the avatar); the full sentence is in the popover, the button's name and the live region. */
@@ -11,6 +15,7 @@ function shortStatus(s: SyncStatus): string {
     case "saving": return "Saving…";
     case "checking": return "Checking…";
     case "offline": return "Offline";
+    case "sample": return "Sample";
     case "choose": return "Review";
     case "error": return "Not saved";
     default: return "";
@@ -33,15 +38,22 @@ const when = (iso: string) => {
 };
 
 /**
- * Optional Google sign-in in the header. Hidden entirely when this build has no Firebase config. Signed out: one
- * "Sign in" button. Signed in: the user's initial and the cloud status; the disclosure holds the name, the full status,
- * "Choose a version" while a choice is pending, "Try again" after a failure, and "Sign out".
+ * The account control, top right in the header (where the Co-Pilot launcher used to be). Signed out: a "Sign in" link
+ * to /signin (Google or email), shown even when sign-in is unavailable, since that page explains why. Signed in: the
+ * user's initial and the cloud status; the disclosure holds the name, the full status, "Choose a version" while a
+ * choice is pending, "Try again" after a failure, and "Sign out" with "Also remove this plan from this device".
  */
-export default function AccountMenu({ cloud, onOpenChoice }: { cloud: CloudSync; onOpenChoice: () => void }) {
+export default function AccountMenu({ cloud, onOpenChoice, onSignOut, onLoadSamples }: {
+  cloud: CloudSync; onOpenChoice: () => void; onSignOut: (removeFromDevice: boolean) => void;
+  /** v8 Part 0b: "Load sample events" (signed in): opens the samples and lets them save to this account. */
+  onLoadSamples?: () => void;
+}) {
   const [open, setOpen] = useState(false);
-  const panelId = useId(), errId = useId();
+  const [forget, setForget] = useState(false);
+  const panelId = useId(), forgetId = useId(), forgetHintId = useId();
   const btn = useRef<HTMLButtonElement>(null);
   const box = useRef<HTMLDivElement>(null);
+  const pathname = usePathname();
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); setOpen(false); btn.current?.focus(); } };
@@ -51,23 +63,19 @@ export default function AccountMenu({ cloud, onOpenChoice }: { cloud: CloudSync;
     return () => { document.removeEventListener("keydown", onKey); document.removeEventListener("pointerdown", onDown); };
   }, [open]);
 
-  if (!cloud.enabled) return null;
   const { user, status } = cloud;
   const label = statusLabel(status);
   // Polite announcements of sync changes ("Saving…" → "Saved to cloud"), present whether or not the panel is open.
-  const live = <span className="sr-only" role="status" aria-live="polite" data-testid="cloud-live">{user ? label : cloud.signInError ?? ""}</span>;
+  const live = <span className="sr-only" role="status" aria-live="polite" data-testid="cloud-live">{user ? label : ""}</span>;
 
   if (!user) {
     return (
       <div className="relative">
-        <button type="button" onClick={cloud.signIn} disabled={cloud.signingIn} data-testid="cloud-signin"
-          title="Sign in with Google to save your plans to the cloud" aria-describedby={cloud.signInError ? errId : undefined}
-          className="flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg border border-line-strong bg-surface px-3 text-sm font-medium text-sand-800 hover:bg-sand-100 disabled:cursor-progress max-md:h-11 pointer-coarse:h-11">
-          <LogIn size={16} aria-hidden="true" className="text-brand-700" /> <span className="max-sm:sr-only">{cloud.signingIn ? "Signing in…" : "Sign in"}</span>
-        </button>
-        {cloud.signInError && (
-          <p id={errId} className="absolute right-0 z-40 mt-2 w-[min(18rem,calc(100vw-1.5rem))] rounded-lg border border-line bg-surface p-2 text-xs text-red-700 shadow-lg">{cloud.signInError}</p>
-        )}
+        <Link href={signInHref(pathname)} data-testid="cloud-signin" data-available={cloud.unavailable ? "false" : "true"}
+          title={cloud.unavailable ? `Sign-in unavailable. ${unavailableText(cloud.unavailable)}` : "Sign in with Google or email to save your plans to the cloud"}
+          className="flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg border border-line-strong bg-surface px-3 text-sm font-medium text-sand-800 hover:bg-sand-100 max-md:h-11 pointer-coarse:h-11">
+          <LogIn size={16} aria-hidden="true" className="text-brand-700" /> <span>Sign in</span>
+        </Link>
         {live}
       </div>
     );
@@ -97,8 +105,20 @@ export default function AccountMenu({ cloud, onOpenChoice }: { cloud: CloudSync;
           <p className="mt-2 flex items-start gap-1.5 text-sm text-ink" data-testid="cloud-status-text">
             <span className="mt-0.5 shrink-0"><StatusIcon s={status} size={16} /></span><span className="min-w-0 break-words">{label}</span>
           </p>
+          {user.emailVerified === false && (
+            <p className="mt-1 text-xs text-amber-800" data-testid="cloud-unverified">Email not verified yet: check your inbox for the link.</p>
+          )}
           <p className="mt-1 text-xs text-ink-muted">Your plans are always saved on this device too.</p>
-          <div className="mt-3 flex flex-wrap gap-2 border-t border-line pt-3">
+          {onLoadSamples && (
+            <div className="mt-3 border-t border-line pt-3">
+              <button type="button" onClick={() => { setOpen(false); btn.current?.focus(); onLoadSamples(); }} data-testid="cloud-load-samples"
+                className="flex min-h-11 items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-3 text-sm font-medium text-sand-800 hover:bg-sand-100">
+                <LayoutTemplate size={16} aria-hidden="true" className="text-brand-700" /> Load sample events
+              </button>
+              <p className="mt-1 text-xs text-ink-muted">Three fully planned examples. A sample saves to your account once you load the samples or edit it.</p>
+            </div>
+          )}
+          {(status.state === "choose" || status.state === "offline" || status.state === "error") && <div className="mt-3 flex flex-wrap gap-2 border-t border-line pt-3">
             {status.state === "choose" && (
               <button type="button" onClick={() => { setOpen(false); onOpenChoice(); }} data-testid="cloud-open-choice"
                 className="flex min-h-11 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-semibold text-white hover:bg-primary-hover">Choose a version</button>
@@ -109,9 +129,17 @@ export default function AccountMenu({ cloud, onOpenChoice }: { cloud: CloudSync;
                 <RefreshCw size={16} aria-hidden="true" /> Try again
               </button>
             )}
-            <button type="button" onClick={() => { setOpen(false); btn.current?.focus(); cloud.signOut(); }} data-testid="cloud-signout"
-              className="flex min-h-11 items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-3 text-sm font-medium text-sand-800 hover:bg-sand-100">
-              <LogOut size={16} aria-hidden="true" /> Sign out
+          </div>}
+          <div className="mt-3 border-t border-line pt-3">
+            <div className="flex items-start gap-2">
+              <input id={forgetId} type="checkbox" checked={forget} onChange={e => setForget(e.target.checked)} aria-describedby={forgetHintId}
+                data-testid="cloud-signout-forget" className="h-6 w-6 shrink-0 accent-brand-700" />
+              <label htmlFor={forgetId} className="pt-0.5 text-sm text-ink">Also remove this plan from this device</label>
+            </div>
+            <p id={forgetHintId} className="mt-1 pl-8 text-xs text-ink-muted">For shared computers: clears the plans saved in this browser. The cloud copy stays in your account.</p>
+            <button type="button" onClick={() => { setOpen(false); onSignOut(forget); }} data-testid="cloud-signout"
+              className="mt-2 flex min-h-11 items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-3 text-sm font-medium text-sand-800 hover:bg-sand-100">
+              <LogOut size={16} aria-hidden="true" /> {forget ? "Sign out and remove" : "Sign out"}
             </button>
           </div>
         </div>

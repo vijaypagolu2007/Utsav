@@ -1,10 +1,16 @@
 // Before → After diff between two plans. Drives the HITL approval card and the canvas highlight pulse.
 import type { EventPlan } from "./schema";
 import { rupees, taskDueDate } from "./commands";
+import { maskPhone } from "./phone";
+
+/** Above this many new or removed people, the card shows one summary row instead of a row each (a 300-guest import). */
+export const DIFF_LIST_MAX = 12;
 
 export type DiffRow = {
   kind: "budget" | "budget_new" | "quote" | "vendor" | "diet" | "signup" | "sub_event" | "task_due" | "task_status" | "block" | "payment" | "rsvp" | "lock" | "wishlist" | "permit" | "sponsor" | "event"
-    | "budget_removed" | "task_new" | "idea" | "basics" | "priorities" | "vendor_stage" | "checklist" | "task_dep";
+    | "budget_removed" | "task_new" | "idea" | "basics" | "priorities" | "vendor_stage" | "checklist" | "task_dep"
+    // v8 Part 1: people on the guest list, households, group join requests, and gifts added / edited / removed.
+    | "guest" | "household" | "join" | "gift";
   id: string;
   label: string;
   before: string;
@@ -131,13 +137,22 @@ export function computePlanDiff(before: EventPlan, after: EventPlan): PlanDiff {
       rows.push({ kind: "rsvp", id: g.id, label: `${g.name} · ${se?.name ?? sid}`, before: b.rsvp[sid] ?? "—", after: v });
     }
   }
+  guestRows(before, after, rows);
   const ea = after.event.ext, eb = before.event.ext;
-  if (ea.type === "birthday" && eb.type === "birthday") for (const w of ea.wishlist) {
-    const o = eb.wishlist.find(x => x.id === w.id);
-    if (o && o.claimedByGuestId !== w.claimedByGuestId) {
-      const nm = (id: string | null) => (id ? after.guests.find(g => g.id === id)?.name ?? id : "Unclaimed");
-      rows.push({ kind: "wishlist", id: w.id, label: w.item, before: nm(o.claimedByGuestId), after: nm(w.claimedByGuestId) });
+  if ((ea.type === "birthday" || ea.type === "wedding") && eb.type === ea.type) {
+    for (const w of ea.wishlist) {
+      const o = eb.wishlist.find(x => x.id === w.id);
+      if (o && o.claimedByGuestId !== w.claimedByGuestId) {
+        const nm = (id: string | null) => (id ? after.guests.find(g => g.id === id)?.name ?? id : "Unclaimed");
+        rows.push({ kind: "wishlist", id: w.id, label: w.item, before: nm(o.claimedByGuestId), after: nm(w.claimedByGuestId) });
+      }
+      const price = (x: typeof w) => (x.approxPaise !== undefined ? `about ${rupees(x.approxPaise)}` : "no price");
+      const desc = (x: typeof w) => `${x.priority} · ${price(x)}${x.url ? " · link" : ""}`;
+      if (!o) rows.push({ kind: "gift", id: w.id, label: `${w.item} (new gift)`, before: "—", after: desc(w) });
+      else if (o.item !== w.item || desc(o) !== desc(w)) rows.push({ kind: "gift", id: w.id, label: w.item, before: `${o.item !== w.item ? `${o.item} · ` : ""}${desc(o)}`, after: desc(w) });
     }
+    for (const o of eb.wishlist) if (!ea.wishlist.some(x => x.id === o.id)) rows.push({ kind: "gift", id: o.id, label: `${o.item} (removed)`, before: o.claimedByGuestId ? "claimed" : "unclaimed", after: "—" });
+    if (ea.wishlistSurprise !== eb.wishlistSurprise) rows.push({ kind: "gift", id: "wishlist-surprise", label: "Surprise mode", before: eb.wishlistSurprise ? "on" : "off", after: ea.wishlistSurprise ? "on" : "off" });
   }
   if (ea.type === "community" && eb.type === "community") {
     for (const p of ea.permits) {
@@ -156,4 +171,48 @@ export function computePlanDiff(before: EventPlan, after: EventPlan): PlanDiff {
     }
   }
   return { rows, changedIds: [...new Set(rows.map(r => r.id))], cascadedTasks };
+}
+
+/**
+ * v8 Part 1: guest-list rows. Phones are masked (the approval card is organizer-only, but it is still a screen someone
+ * may be looking over). Big imports collapse to one summary row so the card stays readable.
+ */
+function guestRows(before: EventPlan, after: EventPlan, rows: DiffRow[]) {
+  const bh = new Map(before.households.map(h => [h.id, h])), ah = new Map(after.households.map(h => [h.id, h]));
+  const bg = new Map(before.guests.map(g => [g.id, g]));
+  const addedH = after.households.filter(h => !bh.has(h.id)), removedH = before.households.filter(h => !ah.has(h.id));
+  const addedG = after.guests.filter(g => !bg.has(g.id)), removedG = before.guests.filter(g => !after.guests.some(x => x.id === g.id));
+  const hhLabel = (id: string) => ah.get(id)?.label ?? bh.get(id)?.label ?? id;
+  if (addedG.length > DIFF_LIST_MAX) {
+    rows.push({ kind: "guest", id: addedG[0]!.id, label: "Guest list", before: `${before.guests.length} guests · ${before.households.length} households`,
+      after: `${after.guests.length} guests · ${after.households.length} households (+${addedG.length} guests, +${addedH.length} households)`,
+      note: `${addedG.slice(0, 5).map(g => g.name).join(", ")} and ${addedG.length - 5} more` });
+  } else {
+    for (const h of addedH) rows.push({ kind: "household", id: h.id, label: `${h.label} (new household)`, before: "—", after: [h.side, h.phone && maskPhone(h.phone), h.email && "email"].filter(Boolean).join(" · ") || "added" });
+    for (const g of addedG) rows.push({ kind: "guest", id: g.id, label: `${g.name} (new guest)`, before: "—", after: `in ${hhLabel(g.householdId)}` });
+  }
+  if (removedG.length > DIFF_LIST_MAX) rows.push({ kind: "guest", id: removedG[0]!.id, label: "Guest list", before: `${before.guests.length} guests`, after: `${after.guests.length} guests (−${removedG.length})` });
+  else for (const g of removedG) rows.push({ kind: "guest", id: g.id, label: `${g.name} (removed)`, before: `in ${hhLabel(g.householdId)}`, after: "—" });
+  for (const h of removedH) rows.push({ kind: "household", id: h.id, label: `${h.label} (removed)`, before: "household", after: "—" });
+  for (const h of after.households) {
+    const o = bh.get(h.id);
+    if (!o) continue;
+    if (o.phone !== h.phone) rows.push({ kind: "household", id: h.id, label: `${h.label} phone`, before: o.phone ? maskPhone(o.phone) : "none", after: h.phone ? maskPhone(h.phone) : "none" });
+    if (o.side !== h.side) rows.push({ kind: "household", id: h.id, label: `${h.label} side`, before: o.side || "—", after: h.side || "—" });
+    if (o.email !== h.email) rows.push({ kind: "household", id: h.id, label: `${h.label} email`, before: o.email ? "set" : "none", after: h.email ? "set" : "none" });
+    if (o.label !== h.label) rows.push({ kind: "household", id: h.id, label: "Household name", before: o.label, after: h.label });
+  }
+  for (const g of after.guests) {
+    const o = bg.get(g.id);
+    if (!o) continue;
+    if (o.householdId !== g.householdId) rows.push({ kind: "guest", id: g.id, label: `${g.name} household`, before: hhLabel(o.householdId), after: hhLabel(g.householdId) });
+    if (o.ageGroup !== g.ageGroup) rows.push({ kind: "guest", id: g.id, label: `${g.name} age group`, before: o.ageGroup, after: g.ageGroup });
+    const inv = (x: typeof g) => Object.keys(x.rsvp).map(id => after.subEvents.find(s => s.id === id)?.name ?? id).sort().join(", ") || "nothing";
+    if (Object.keys(o.rsvp).sort().join() !== Object.keys(g.rsvp).sort().join()) rows.push({ kind: "guest", id: g.id, label: `${g.name} invited to`, before: inv(o), after: inv(g) });
+  }
+  for (const r of after.joinRequests) {
+    const o = before.joinRequests.find(x => x.id === r.id);
+    if (!o) rows.push({ kind: "join", id: r.id, label: `Join request: ${r.name}`, before: "—", after: `pending · ${r.size}` });
+    else if (o.status !== r.status) rows.push({ kind: "join", id: r.id, label: `Join request: ${r.name} (${r.size})`, before: o.status, after: r.status === "approved" ? `approved · household ${hhLabel(r.householdId ?? "")}` : r.status });
+  }
 }

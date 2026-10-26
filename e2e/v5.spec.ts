@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { skipWelcome, openPageNav } from "./helpers";
+import { skipWelcome, openPageNav, switchEvent } from "./helpers";
 
 // v5: first-run welcome and setup (user-chosen budget), add/remove budget lines, total + rebalance, the Ideas page
 // (offline Demo Mode bank), and the removed "haldi" template jump. The server runs with Gemini disabled.
@@ -43,7 +43,7 @@ test("first run: the welcome offers both choices, and Explore a sample keeps the
   await expect(h1(page)).toHaveText(/Arcade|Rohan/);
   await page.reload();
   await expect(page.getByTestId("welcome")).toHaveCount(0);
-  await expect(page.getByRole("combobox", { name: "Event" })).toHaveValue("birthday");
+  await expect(page.getByTestId("event-switcher")).toHaveAttribute("data-active", "birthday");
 });
 
 test("setup: custom amounts are kept exactly, booked is committed and locked, blanks fill the rest, total matches to the paisa", async ({ page }) => {
@@ -197,7 +197,7 @@ test.describe("returning user", () => {
 
   test("regression: a 'haldi' message on a birthday plan never switches template or resets the plan", async ({ page }) => {
     await page.goto("/");
-    await page.getByRole("combobox", { name: "Event" }).selectOption("birthday");
+    await switchEvent(page, "birthday");
     // Make the plan the user's own first, so a reset would be visible.
     await page.getByRole("button", { name: "Edit event name" }).click();
     await page.getByRole("textbox", { name: "event name" }).fill("Rohan's Big Three-Oh");
@@ -208,7 +208,7 @@ test.describe("returning user", () => {
     await page.getByRole("button", { name: "Send", exact: true }).click();
     await expect(page.getByTestId("copilot-drawer").getByText(/Offline demo mode understands|No sub-event|couldn't/).last()).toBeVisible();
     await page.keyboard.press("Escape");
-    await expect(page.getByRole("combobox", { name: "Event" })).toHaveValue("birthday");
+    await expect(page.getByTestId("event-switcher")).toHaveAttribute("data-active", "birthday");
     await expect(h1(page)).toHaveText("Rohan's Big Three-Oh");
     await expect(page.getByText(/Switched to the/)).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Undo" })).toBeEnabled();

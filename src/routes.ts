@@ -4,7 +4,7 @@
 import type { DiffRow } from "./diff";
 import type { InsightKind } from "./insights";
 
-export type PageId = "overview" | "budget" | "vendors" | "tasks" | "schedule" | "event" | "ideas";
+export type PageId = "overview" | "budget" | "vendors" | "tasks" | "schedule" | "event" | "guests" | "ideas";
 export type PlannerPage = { id: PageId; href: string; label: string; /** <title> prefix and, except on Overview, the h1. */ title: string; description: string };
 
 export const APP_NAME = "Utsav Co-Pilot";
@@ -18,6 +18,7 @@ export const PAGES: readonly PlannerPage[] = [
   { id: "tasks", href: "/tasks", label: "Tasks", title: "Tasks", description: "Every task with its derived due date, grouped by status." },
   { id: "schedule", href: "/schedule", label: "Schedule", title: "Schedule", description: "Sub-events, their run-of-show lanes and guest-link visibility." },
   { id: "event", href: "/event", label: "Event", title: "Event", description: "The parts specific to this kind of event: RSVPs and diets, wishlist and activities, or sponsors and permits." },
+  { id: "guests", href: "/guests", label: "Guests", title: "Guests", description: "Households, phones and private invite links, imports from contacts, the group join link, and who changed which RSVP." },
   { id: "ideas", href: "/ideas", label: "Ideas", title: "Ideas", description: "Personalised themes, decor, menus, activities and more, sized to what is left in your budget." },
 ];
 
@@ -50,6 +51,7 @@ const DIFF_PAGE: Record<DiffRow["kind"], PageId> = {
   diet: "event", signup: "event", rsvp: "event", wishlist: "event", permit: "event", sponsor: "event",
   event: "overview", basics: "overview",
   budget_removed: "budget", task_new: "tasks", idea: "ideas",
+  guest: "guests", household: "guests", join: "guests", gift: "event",
 };
 
 /** The pages a change touched, in nav order, leaving out `current` (the page already on screen). */

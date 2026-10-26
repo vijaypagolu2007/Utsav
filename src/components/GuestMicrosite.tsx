@@ -1,93 +1,82 @@
 "use client";
 import { Fragment, useState, type ReactNode } from "react";
-import { Anchor, CalendarHeart, Check, Clock, Gift, Handshake, HandHeart, MapPin, Shirt, UserRound, Utensils } from "lucide-react";
+import { Anchor, CalendarHeart, Check, Clock, Gift, Handshake, HandHeart, MapPin, Shirt, UserRound } from "lucide-react";
 import type { AgentState, SponsorTier } from "@/schema";
 import { daysBetween } from "@/commands";
 import type { Commit, Highlight } from "./PlannerApp";
-import { Badge, Card, Empty, hhmm, phaseTone, prettyDate, useHighlight } from "./ui";
+import { Badge, Card, hhmm, phaseTone, prettyDate, useHighlight } from "./ui";
 import { formatTokens, templateTokens, type EventTemplate, type GuestSectionId } from "@/config/event-templates";
-import { DEFAULT_SPONSOR_TIER, DIET_OPTIONS, GUEST_RSVP_ANSWERS, SPONSOR_TIER_OPTIONS, VOLUNTEER_SHIFTS } from "@/config/planner-options";
+import { DEFAULT_SPONSOR_TIER, SPONSOR_TIER_OPTIONS, VOLUNTEER_SHIFTS } from "@/config/planner-options";
+import { ANSWER_LABEL, rsvpFunctions } from "@/rsvp";
+import RsvpForm from "./RsvpForm";
 
 type Props = {
   template: EventTemplate;
   plan: AgentState; today: string; commit: Commit; highlight: Highlight;
-  actingGuestId: string | null; setActingGuestId: (id: string) => void;
+  actingEntryId: string | null; setActingEntryId: (id: string) => void;
   /** Optional guest-facing summary figures (no money), shown under the invitation. */
   summary?: ReactNode;
 };
 
 const big = "min-h-11 rounded-lg px-3.5 text-sm font-semibold";
 const field = "mt-1 block min-h-11 w-full rounded-lg border border-line-strong bg-surface px-3 text-base font-normal text-ink";
-const ANSWER_ON: Record<string, string> = { yes: "bg-emerald-700 text-white ring-emerald-700", no: "bg-red-700 text-white ring-red-700", maybe: "bg-amber-700 text-white ring-amber-700" };
 
-function RsvpCard({ plan, commit, actingGuestId, setActingGuestId, highlight }: Props) {
-  const hl = useHighlight(highlight);
-  const me = plan.guests.find(g => g.id === actingGuestId);
-  if (!plan.guests.length) return <Empty>The guest list isn&apos;t open yet.</Empty>;
+/** A fresh RSVP entry id for a Guest View preview answer (the real link gets its id from the server). */
+const previewEntryId = () => `r-preview-${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
+
+/**
+ * v8 Part 1c: Guest View shows the same open RSVP form a guest gets on the RSVP link. "Answering as" picks one of the
+ * RSVPs already sent (to preview editing it) or a new one; every answer is a submit_rsvp_entry with role "guest".
+ */
+function RsvpCard({ plan, commit, actingEntryId, setActingEntryId }: Props) {
+  const live = plan.rsvpEntries.filter(e => !e.removedAt && !e.mergedInto);
+  const me = live.find(e => e.id === actingEntryId) ?? null;
+  const [saved, setSaved] = useState<string | null>(null);
+  const fns = rsvpFunctions(plan);
   return (
     <div className="space-y-4">
-      <label className="block text-sm font-medium text-sand-800">
-        <span className="flex items-center gap-1.5"><UserRound size={16} aria-hidden="true" /> You are</span>
-        <select value={actingGuestId ?? ""} onChange={e => setActingGuestId(e.target.value)} className={field}>
-          {plan.households.map(h => (
-            <optgroup key={h.id} label={h.label}>
-              {plan.guests.filter(g => g.householdId === h.id).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-            </optgroup>
-          ))}
-        </select>
-      </label>
-      {me && (
-        <>
-          <ul className="space-y-2">
-            {plan.subEvents.filter(s => s.id in me.rsvp).sort((a, b) => a.date.localeCompare(b.date)).map(s => {
-              const v = me.rsvp[s.id];
-              return (
-                <li key={s.id} className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl p-3 ring-1 ring-inset ring-line ${hl(me.id)}`}>
-                  <div className="min-w-0 flex-1 basis-32"><p className="text-base font-semibold text-ink">{s.name}</p><p className="text-sm tabular-nums text-ink-muted">{prettyDate(s.date)} · {hhmm(s.startMin)}</p></div>
-                  <div className="flex gap-1.5" role="group" aria-label={`RSVP for ${s.name}`}>
-                    {GUEST_RSVP_ANSWERS.map(a => (
-                      <button type="button" key={a} aria-pressed={v === a} onClick={() => commit({ summary: `${me.name} · ${s.name}: ${a}`, commands: [{ op: "set_rsvp", guestId: me.id, subEvent: s.slug, answer: a }] })}
-                        className={`flex min-w-11 items-center justify-center gap-1 capitalize ring-1 ring-inset ${big} ${v === a ? ANSWER_ON[a] : "bg-surface text-sand-800 ring-sand-400 hover:bg-sand-100"}`}>{v === a && <Check size={15} aria-hidden="true" />}{a}</button>
-                    ))}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-          <div>
-            <h3 id={`diet-${me.id}`} className="mb-2 flex items-center gap-1.5 text-base font-semibold text-ink"><Utensils size={16} aria-hidden="true" /> Dietary needs</h3>
-            <div className="flex flex-wrap gap-2" role="group" aria-labelledby={`diet-${me.id}`}>
-              {DIET_OPTIONS.map(({ value: d, label }) => {
-                const on = me.diet.includes(d);
-                return (
-                  <button type="button" key={d} aria-pressed={on} onClick={() => commit({ summary: `${me.name} diet`, commands: [{ op: "set_guest_diet", guestId: me.id, diet: on ? me.diet.filter(x => x !== d) : [...me.diet, d] }] })}
-                    className={`flex min-h-11 items-center gap-1 rounded-full px-4 text-sm font-medium ring-1 ring-inset ${on ? "bg-primary text-white ring-brand-700" : "bg-surface text-sand-800 ring-sand-400 hover:bg-sand-100"}`}>{on && <Check size={15} aria-hidden="true" />}{label}</button>
-                );
-              })}
-            </div>
-          </div>
-        </>
+      {live.length > 0 && (
+        <label className="block text-sm font-medium text-sand-800">
+          <span className="flex items-center gap-1.5"><UserRound size={16} aria-hidden="true" /> Answering as</span>
+          <select value={me?.id ?? ""} onChange={e => { setActingEntryId(e.target.value); setSaved(null); }} className={field} data-testid="guest-acting-entry">
+            <option value="">A new guest</option>
+            {live.slice(0, 200).map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+          </select>
+        </label>
       )}
+      <RsvpForm key={me?.id ?? "new"} functions={fns.map(s => ({ id: s.id, name: s.name, date: s.date }))} askKids={plan.rsvpSettings.askKids}
+        initial={me ? { name: me.name, partySize: me.partySize, kids: me.kids, functions: me.functions, meal: me.meal, answer: me.answer, hasPhone: !!me.phone } : null}
+        submitLabel={me ? "Update RSVP" : "Send RSVP"}
+        onSubmit={v => {
+          const entryId = me?.id ?? previewEntryId();
+          const r = commit({ summary: `RSVP from ${v.name}`, commands: [{ op: "submit_rsvp_entry", entryId, name: v.name, ...(v.phone ? { phone: v.phone } : {}),
+            partySize: v.partySize, ...(v.kids !== null ? { kids: v.kids } : {}), functions: v.functions, meal: v.meal, answer: v.answer }] });
+          if (!r.ok) return r.reason;
+          setActingEntryId(entryId); setSaved(`Saved ${v.name}'s RSVP (${v.partySize}, ${ANSWER_LABEL[v.answer]}).`);
+          return null;
+        }} />
+      <p role="status" className="text-sm text-ink-muted empty:hidden">{saved}</p>
     </div>
   );
 }
 
-function Wishlist({ plan, commit, actingGuestId, highlight }: Props) {
+function Wishlist({ plan, commit, actingEntryId, highlight }: Props) {
   const hl = useHighlight(highlight);
   const ext = plan.event.ext;
-  if (ext.type !== "birthday") return null;
-  const name = (id: string | null) => plan.guests.find(g => g.id === id)?.name;
+  if (ext.type !== "birthday" && ext.type !== "wedding") return null;
+  // Surprise mode (v8 Part 1): the preview never names who claimed a gift.
+  const name = (id: string | null) => (ext.wishlistSurprise ? null : plan.guests.find(g => g.id === id)?.name ?? plan.rsvpEntries.find(e => e.id === id)?.name);
   return (
     <ul className="space-y-2">
       {ext.wishlist.map(w => {
-        const mine = w.claimedByGuestId === actingGuestId;
+        const mine = !!actingEntryId && w.claimedByGuestId === actingEntryId;
         return (
           <li key={w.id} className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl p-3 ring-1 ring-inset ring-line ${hl(w.id)}`}>
             <Gift size={18} aria-hidden="true" className="shrink-0 text-brand-700" />
             <span className="min-w-0 flex-1 basis-32 text-base font-medium text-ink">{w.item} {w.priority === "high" && <Badge tone="primary">most wanted</Badge>}</span>
-            {w.claimedByGuestId && !mine ? <Badge>claimed by {name(w.claimedByGuestId)}</Badge> : (
-              <button type="button" disabled={!actingGuestId}
-                onClick={() => commit({ summary: `${mine ? "Release" : "Claim"} ${w.item}`, commands: [{ op: "claim_wishlist_item", itemId: w.id, guestId: mine ? null : actingGuestId }] })}
+            {w.claimedByGuestId && !mine ? <Badge>{name(w.claimedByGuestId) ? `claimed by ${name(w.claimedByGuestId)}` : "claimed"}</Badge> : (
+              <button type="button" disabled={!actingEntryId} title={actingEntryId ? undefined : "Send an RSVP first"}
+                onClick={() => actingEntryId && commit({ summary: mine ? `Release ${w.item}` : `Claim ${w.item}`, commands: [{ op: "claim_wishlist_item", itemId: w.id, guestId: mine ? null : actingEntryId }] })}
                 className={`flex items-center gap-1 text-white disabled:opacity-50 ${big} ${mine ? "bg-emerald-700 hover:bg-emerald-800" : "bg-primary hover:bg-primary-hover"}`}>
                 {mine ? <><Check size={15} aria-hidden="true" /> Yours (release)</> : "I'll bring this"}<span className="sr-only">: {w.item}</span>
               </button>
@@ -162,8 +151,14 @@ function CommunitySignup({ plan, commit }: Props) {
  * through commit() with role "guest", and the reducer allows only the guest ops.
  */
 const GUEST_SECTIONS: Record<GuestSectionId, (p: Props) => ReactNode> = {
-  "guest-rsvp": p => p.plan.guests.length > 0 && <Card title="Your RSVP" subtitle="Tell the hosts who is coming to each part." icon={<UserRound size={18} className="text-emerald-700" />}><RsvpCard {...p} /></Card>,
-  "guest-wishlist": p => p.plan.event.ext.type === "birthday" && <Card title="Gift wishlist" subtitle="Claim a gift so nobody doubles up." icon={<Gift size={18} className="text-brand-700" />}><Wishlist {...p} /></Card>,
+  "guest-rsvp": p => rsvpFunctions(p.plan).length > 0 && <Card title="Your RSVP" subtitle="The same form guests get on the RSVP link: one per family." icon={<UserRound size={18} className="text-emerald-700" />}><RsvpCard {...p} /></Card>,
+  "guest-wishlist": p => {
+    const x = p.plan.event.ext;
+    if (x.type === "birthday") return <Card title="Gift wishlist" subtitle="Claim a gift so nobody doubles up." icon={<Gift size={18} className="text-brand-700" />}><Wishlist {...p} /></Card>;
+    // v8 Part 1: the wedding gift registry, shown once the couple has added a gift.
+    if (x.type === "wedding" && x.wishlist.length > 0) return <Card title="Gift registry" subtitle="Claim a gift so nobody doubles up." icon={<Gift size={18} className="text-brand-700" />}><Wishlist {...p} /></Card>;
+    return null;
+  },
   "community-signup": p => p.plan.event.ext.type === "community" && <Card title="Get involved" subtitle="Volunteer for a shift or sponsor the fest." icon={<HandHeart size={18} className="text-emerald-700" />}><CommunitySignup {...p} /></Card>,
 };
 const renderSections = (ids: readonly GuestSectionId[], p: Props) => ids.map(id => <Fragment key={id}>{GUEST_SECTIONS[id](p)}</Fragment>);

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { skipWelcome, openPageNav } from "./helpers";
+import { skipWelcome, openPageNav, switchEvent } from "./helpers";
 
 // Co-Pilot drawer, keyboard/focus, budget meters, responsive layout and an axe-core WCAG 2.2 A/AA scan.
 // Runs against the same Demo Mode build as smoke.spec.ts (no Gemini calls).
@@ -198,7 +198,7 @@ test("landmarks, headings, and named controls", async ({ page }) => {
     await expect(page.getByRole("menuitem", { name, exact: true })).toBeVisible();
   }
   await expect(page.getByLabel("Planning date")).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "Event" })).toBeVisible();
+  await expect(page.getByTestId("event-switcher")).toBeVisible();
   await expect(page.getByRole("button", { name: "Organizer" })).toHaveAttribute("aria-pressed", "true");
 });
 
@@ -243,7 +243,7 @@ test("axe: open Co-Pilot drawer has no violations", async ({ page }) => {
 });
 test("axe: guest view and each event type", async ({ page }) => {
   for (const t of ["birthday", "community", "wedding"]) {
-    await page.getByRole("combobox", { name: "Event" }).selectOption(t);
+    await switchEvent(page, t);
     expect(await axe(page), `organizer ${t}`).toEqual([]);
   }
   await page.getByRole("button", { name: "Guest View" }).click();
@@ -257,7 +257,7 @@ for (const width of [320, 375, 768, 1280]) {
     await page.goto("/");
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     for (const t of ["birthday", "community", "wedding"]) {
-      await page.getByRole("combobox", { name: "Event" }).selectOption(t);
+      await switchEvent(page, t);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       expect(overflow, `document-level horizontal overflow (${t})`).toBeLessThanOrEqual(0);
     }
@@ -339,7 +339,7 @@ test("More is an APG menu button: arrows move, Escape closes and returns focus",
 });
 
 test("organizer: every control exists once (one timeline / RSVP variant rendered at a time)", async ({ page }) => {
-  await page.getByRole("combobox", { name: "Event" }).selectOption("wedding");
+  await switchEvent(page, "wedding");
   await openPage(page, "Schedule");
   for (const width of [375, 1280]) {
     await page.setViewportSize({ width, height: 900 });
@@ -382,14 +382,14 @@ test("mobile tab bar: four page links and More, 44px tall, aria-current follows 
   await more.click();
   await expect(more).toHaveAttribute("aria-expanded", "true");
   const sheet = page.getByTestId("more-sheet");
-  await expect(sheet.getByRole("link")).toHaveText(["Schedule", "Event", "Ideas"]);
+  await expect(sheet.getByRole("link")).toHaveText(["Schedule", "Event", "Guests", "Ideas"]);
   await expect(sheet.getByRole("link", { name: "Schedule" })).toBeFocused();
   for (const l of await sheet.getByRole("link").all()) expect((await l.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   expect(await axe(page), "More sheet open").toEqual([]);
   await page.keyboard.press("Escape");
   await expect(sheet).toHaveCount(0);
   await expect(more).toBeFocused();
-  for (const [name, id] of [["Schedule", "schedule"], ["Event", "event"], ["Ideas", "ideas"]] as const) {
+  for (const [name, id] of [["Schedule", "schedule"], ["Event", "event"], ["Guests", "guests"], ["Ideas", "ideas"]] as const) {
     await more.click();
     await sheet.getByRole("link", { name }).click();
     await expect(page).toHaveURL(new RegExp(`/${id}$`));
@@ -401,7 +401,7 @@ test("mobile tab bar: four page links and More, 44px tall, aria-current follows 
   await page.setViewportSize({ width: 768, height: 900 });
   await expect(nav).toBeVisible();
   await expect(page.getByRole("banner").getByRole("navigation", { name: "Pages" })).toBeVisible();
-  await expect(page.getByRole("banner").getByRole("navigation", { name: "Pages" }).getByRole("link")).toHaveCount(7);
+  await expect(page.getByRole("banner").getByRole("navigation", { name: "Pages" }).getByRole("link")).toHaveCount(8);
   await page.setViewportSize({ width: 375, height: 740 });
   await page.getByRole("button", { name: "Guest View" }).click();
   await expect(nav).toHaveCount(0);
@@ -426,7 +426,7 @@ for (const width of [375, 1280]) {
   test(`target size ${width}px: every visible interactive element is at least 24x24 (organizer, menus, guest)`, async ({ page }) => {
     await page.setViewportSize({ width, height: width < 768 ? 740 : 900 });
     for (const t of ["birthday", "community", "wedding"]) {
-      await page.getByRole("combobox", { name: "Event" }).selectOption(t);
+      await switchEvent(page, t);
       expect(await smallTargets(page), `organizer ${t}`).toEqual([]);
     }
     await openMore(page);
@@ -444,29 +444,55 @@ for (const width of [375, 1280]) {
     expect(await smallTargets(page), "Co-Pilot drawer").toEqual([]);
   });
 
-  test(`launcher ${width}px: docked once in the header, never over page content`, async ({ page }) => {
+  test(`launcher ${width}px: one round floating button at the bottom right, never over page content`, async ({ page }) => {
     await page.setViewportSize({ width, height: width < 768 ? 740 : 900 });
-    await expect(page.getByTestId("copilot-launcher")).toHaveCount(1);
-    await expect(page.getByRole("banner").getByTestId("copilot-launcher")).toBeVisible();
-    const l = (await launcher(page).boundingBox())!;
-    const main = (await page.getByTestId("dashboard").boundingBox())!;
-    expect(l.y + l.height).toBeLessThanOrEqual(main.y);
-    // Wherever the page is scrolled, the launcher (when on screen) is the topmost thing at its own centre.
-    for (const frac of [0.25, 0.5, 1]) {
+    const fab = page.getByTestId("copilot-launcher");
+    await expect(fab).toHaveCount(1);
+    await expect(fab).toBeVisible();
+    await expect(fab).toHaveAccessibleName("Open AI Co-Pilot");
+    // v8: not in the header any more; the account control holds the header's top-right slot instead.
+    await expect(page.getByRole("banner").getByTestId("copilot-launcher")).toHaveCount(0);
+    await expect(page.getByTestId("header-account-slot").getByTestId("cloud-signin")).toBeVisible();
+    const l = (await fab.boundingBox())!;
+    expect(Math.round(l.width)).toBe(56);
+    expect(Math.round(l.height)).toBe(56);
+    expect(await fab.evaluate(el => getComputedStyle(el).position)).toBe("fixed");
+    // Bottom right, inside the viewport.
+    expect(l.x + l.width).toBeLessThanOrEqual(width - 8);
+    expect(l.x + l.width).toBeGreaterThan(width - 40);
+    const vh = page.viewportSize()!.height;
+    expect(l.y + l.height).toBeLessThanOrEqual(vh - 8);
+    if (width < 768) {
+      // Above the bottom tab bar, never on it.
+      const nav = (await page.getByRole("navigation", { name: "Pages" }).boundingBox())!;
+      expect(l.y + l.height).toBeLessThanOrEqual(nav.y);
+    } else {
+      expect(l.y + l.height).toBeGreaterThan(vh - 40);
+    }
+    // Keyboard focus shows a visible ring.
+    await fab.focus();
+    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.press("Tab");
+    await expect(fab).toBeFocused();
+    expect(await fab.evaluate(el => getComputedStyle(el).outlineStyle)).not.toBe("none");
+    // Wherever the page is scrolled, the launcher is the topmost thing at its own centre.
+    for (const frac of [0, 0.5, 1]) {
       await page.evaluate(f => window.scrollTo(0, (document.documentElement.scrollHeight - innerHeight) * f), frac);
-      const ok = await launcher(page).evaluate(el => {
+      const ok = await fab.evaluate(el => {
         const r = el.getBoundingClientRect();
-        if (r.bottom <= 0) return true; // scrolled away with a non-sticky header
         const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
         return !!hit && el.contains(hit);
       });
-      expect(ok, `launcher covered or covering at ${frac}`).toBe(true);
+      expect(ok, `launcher covered at ${frac}`).toBe(true);
     }
+    // At the very bottom of a page, the last content ends above the launcher (main reserves --fab-space), and on mobile
+    // the tab bar sits below the last section instead of over it (the Event page's card).
+    await openPage(page, "Event");
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    const last = (await page.locator("#event").boundingBox())!;
+    const now = (await fab.boundingBox())!;
+    expect(last.y + last.height).toBeLessThanOrEqual(now.y);
     if (width < 768) {
-      // At the very bottom, the tab bar sits below the last section instead of over it (the Event page's card).
-      await openPage(page, "Event");
-      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-      const last = (await page.locator("#event").boundingBox())!;
       const nav = (await page.getByRole("navigation", { name: "Pages" }).boundingBox())!;
       expect(last.y + last.height).toBeLessThanOrEqual(nav.y);
     }
@@ -476,7 +502,7 @@ for (const width of [375, 1280]) {
 test("axe at 375px: organizer (each event type), More menu and guest view", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 740 });
   for (const t of ["birthday", "community", "wedding"]) {
-    await page.getByRole("combobox", { name: "Event" }).selectOption(t);
+    await switchEvent(page, t);
     expect(await axe(page), `organizer ${t} 375px`).toEqual([]);
   }
   await openMore(page);
@@ -487,17 +513,19 @@ test("axe at 375px: organizer (each event type), More menu and guest view", asyn
 });
 
 async function publishLink(page: Page, template: string, which: "public" | "invite") {
-  await page.getByRole("combobox", { name: "Event" }).selectOption(template);
+  await switchEvent(page, template);
   await page.getByTestId("open-guest-links").click();
   await page.getByTestId("publish-guest-links").click();
-  const input = which === "public" ? page.getByTestId("public-guest-link") : page.locator('input[data-testid^="invite-"]').first();
+  // v8 Part 1d: the dialog shows only the RSVP link. The old public itinerary URL is the same address without #k=.
+  const input = page.getByTestId("rsvp-guest-link");
   await expect(input).toBeVisible();
-  const url = await input.inputValue();
+  const rsvpUrl = await input.inputValue();
+  const url = which === "public" ? rsvpUrl.replace(/#.*$/, "") : rsvpUrl;
   await page.getByRole("button", { name: "Close", exact: true }).click();
   return url;
 }
 
-test("public guest link: visible labels, 44px RSVP and diet targets, errors linked with aria-describedby, axe clean", async ({ page, browser }) => {
+test("public guest link: visible labels, 44px RSVP form targets, errors linked with aria-describedby, axe clean", async ({ page, browser }) => {
   const ctx = await browser.newContext({ viewport: { width: 375, height: 740 } });
   const guest = await ctx.newPage();
   // Community public link: the volunteer / sponsor forms.
@@ -506,23 +534,30 @@ test("public guest link: visible labels, 44px RSVP and diet targets, errors link
   for (const name of ["Volunteer name", "Sub-event", "Shift", "Sponsor name", "Tier"]) await expect(guest.getByLabel(name)).toBeVisible();
   expect(await smallTargets(guest), "community public page targets").toEqual([]);
   expect(await axe(guest), "community public page").toEqual([]);
-  // Wedding household link: RSVP and meal buttons.
+  // Wedding RSVP link (v8 Part 1c): the open form, every control labelled and at least 44px.
   await guest.goto(await publishLink(page, "wedding", "invite"));
-  await expect(guest.getByText("Your RSVP").first()).toBeVisible();
-  expect(await smallTargets(guest), "wedding invite targets").toEqual([]);
-  const rsvp = guest.getByRole("button", { name: /^maybe/ }).first();
-  const rb = (await rsvp.boundingBox())!;
-  expect(Math.min(rb.width, rb.height)).toBeGreaterThanOrEqual(44);
-  const diet = guest.getByRole("button", { name: "veg", exact: true }).first();
-  expect((await diet.boundingBox())!.height).toBeGreaterThanOrEqual(44);
-  expect(await axe(guest), "wedding invite page").toEqual([]);
-  // A failed save is announced and linked to the controls it came from.
-  await guest.route("**/api/events/*/guest", r => r.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ message: "simulated conflict" }) }));
-  await rsvp.click();
-  await expect(guest.getByRole("status")).toContainText("Not saved: simulated conflict");
-  // The first "maybe" belongs to the first guest's first sub-event group; only that group is described by the error.
-  const groups = guest.getByRole("group", { name: "Haldi" });
-  await expect(groups.first()).toHaveAccessibleDescription(/Not saved: simulated conflict/);
-  await expect(groups.nth(1)).toHaveAccessibleDescription("");
+  await expect(guest.getByTestId("rsvp-form")).toBeVisible();
+  for (const name of ["Your name *", "WhatsApp number (optional)", "People in your party"]) await expect(guest.getByLabel(name, { exact: false }).first()).toBeVisible();
+  await expect(guest.getByRole("group", { name: "Will you come?" })).toBeVisible();
+  await expect(guest.getByRole("group", { name: "Functions you're attending" })).toBeVisible();
+  await expect(guest.getByRole("group", { name: "Meal" })).toBeVisible();
+  expect(await smallTargets(guest), "RSVP form targets").toEqual([]);
+  for (const id of ["rsvp-answer-maybe", "rsvp-fn-s1", "rsvp-meal-jain", "rsvp-party-plus", "rsvp-submit"]) {
+    const b = (await guest.getByTestId(id).boundingBox())!;
+    expect(Math.min(b.width, b.height), id).toBeGreaterThanOrEqual(44);
+  }
+  expect(await axe(guest), "wedding RSVP form").toEqual([]);
+  // A missing name is announced and linked to the field it came from.
+  await guest.getByTestId("rsvp-submit").click();
+  await expect(guest.getByTestId("rsvp-error")).toHaveText("Enter your name.");
+  await expect(guest.getByTestId("rsvp-name")).toHaveAccessibleDescription("Enter your name.");
+  await expect(guest.getByTestId("rsvp-name")).toHaveAttribute("aria-invalid", "true");
+  // A server failure is announced in the form's alert.
+  await guest.route("**/api/events/*/rsvp", r => r.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ message: "simulated conflict" }) }));
+  await guest.getByTestId("rsvp-name").fill("Asha");
+  await guest.getByTestId("rsvp-fn-s3").click();
+  await guest.getByTestId("rsvp-submit").click();
+  await expect(guest.getByTestId("rsvp-error")).toHaveText("simulated conflict");
+  expect(await axe(guest), "wedding RSVP form with an error").toEqual([]);
   await ctx.close();
 });

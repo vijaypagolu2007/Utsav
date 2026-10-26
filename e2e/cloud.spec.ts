@@ -1,9 +1,9 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { skipWelcome } from "./helpers";
+import { skipWelcome, switchEvent } from "./helpers";
 
-// v7: optional Google sign-in + cloud save. Firebase is never configured in E2E, so by default the sign-in control is
-// hidden and no Firebase code loads. The signed-in tests stand in a fake auth module (window.__UTSAV_AUTH_MOCK__, honoured
+// v7: optional Google sign-in + cloud save. Firebase is never configured in E2E, so by default no Firebase code loads
+// and the header's "Sign in" leads to /signin, which says "Sign-in unavailable" (v8: never hidden). The signed-in tests stand in a fake auth module (window.__UTSAV_AUTH_MOCK__, honoured
 // only because the E2E build sets NEXT_PUBLIC_UTSAV_E2E_AUTH_MOCK=1) and answer /api/cloud/plans/* from an in-test fake
 // with the same compare-and-set contract as src/server/cloud-handler.ts. The live popup and Firestore are not exercised.
 
@@ -62,6 +62,12 @@ async function fakeCloud(page: Page, opts: { offline?: boolean } = {}) {
   return { docs, puts, state };
 }
 
+/**
+ * v8 Part 0b: this account already answered the first sign-in choice on this device ("Load sample events"), so the
+ * signed-in tests below start where they always did: the sample on screen saves to the cloud.
+ */
+const samplesChosen = (page: Page) => page.addInitScript(() => { try { localStorage.setItem("utsav_first_choice_v1", JSON.stringify({ "e2e-user": "samples" })); } catch { /* storage blocked */ } });
+
 /** The current sample plan as saved locally (to seed a "cloud copy" that differs from it). */
 const localPlan = (page: Page) => page.evaluate(() => {
   const s = JSON.parse(localStorage.getItem("genai_event_planner_v1") ?? "null");
@@ -76,16 +82,26 @@ async function renameEvent(page: Page, title: string) {
   await expect(page.getByRole("heading", { level: 1 })).toContainText(title);
 }
 const account = (page: Page) => page.getByTestId("cloud-account");
+/** v8: the header's Sign in is a link to /signin; "Continue with Google" there signs in and comes back to the same page. */
+async function signInViaPage(page: Page) {
+  const from = new URL(page.url()).pathname;
+  await page.getByTestId("cloud-signin").click();
+  await expect(page).toHaveURL(/\/signin(\?|$)/);
+  await page.getByTestId("signin-google").click();
+  await expect(page).toHaveURL(new RegExp(`${from.replace(/\//g, "\\/")}$`));
+}
 
-test("Firebase not configured: no sign-in control, no Firebase code or cloud calls, and the app works as before", async ({ page }) => {
+test("Firebase not configured: Sign in leads to 'Sign-in unavailable', no Firebase code or cloud calls, and the app works as before", async ({ page }) => {
   const hits: string[] = [];
   page.on("request", r => { if (/firebase|googleapis\.com\/identitytoolkit|\/api\/cloud\//i.test(r.url())) hits.push(r.url()); });
   const res = await page.goto("/");
   expect(res?.headers()["cross-origin-opener-policy"]).toBe("same-origin-allow-popups");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-  await expect(page.getByTestId("cloud-signin")).toHaveCount(0);
+  // v8: the control is shown (never silently hidden) and says sign-in is unavailable.
+  const signIn = page.getByTestId("cloud-signin");
+  await expect(signIn).toBeVisible();
+  await expect(signIn).toHaveAttribute("data-available", "false");
   await expect(account(page)).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /sign in/i })).toHaveCount(0);
   // Plans still save locally and edit through the reducer.
   await renameEvent(page, "Local only wedding");
   await page.reload();
@@ -95,6 +111,12 @@ test("Firebase not configured: no sign-in control, no Firebase code or cloud cal
   await page.getByTestId("open-guest-links").click();
   await expect(page.getByRole("dialog", { name: "Guest links" })).toBeVisible();
   await page.keyboard.press("Escape");
+  await page.getByTestId("cloud-signin").click();
+  await expect(page).toHaveURL(/\/signin\?next=%2Fbudget$/);
+  await expect(page.getByTestId("signin-unavailable")).toBeVisible();
+  await expect(page.getByTestId("signin-unavailable")).toHaveAttribute("data-reason", "unconfigured");
+  await page.getByTestId("signin-skip").click();
+  await expect(page).toHaveURL(/\/budget$/);
   await page.waitForTimeout(300);
   expect(hits).toEqual([]);
   const scripts = await page.evaluate(() => performance.getEntriesByType("resource").map(e => e.name).filter(n => /firebase/i.test(n)));
@@ -108,14 +130,16 @@ test("the cloud API answers 503 cleanly without the public Firebase config (no-s
   expect((await r.json()).error).toBe("cloud_not_configured");
 });
 
-test("mocked sign-in: first save creates the cloud copy, edits autosave with compare-and-set, sign out", async ({ page }) => {
+test("mocked sign-in: 'Load sample events' creates the cloud copy, edits autosave with compare-and-set, sign out", async ({ page }) => {
   await mockAuth(page);
   const cloud = await fakeCloud(page);
   await page.goto("/");
   const signIn = page.getByTestId("cloud-signin");
   await expect(signIn).toBeVisible();
   await expect(signIn).toHaveAccessibleName("Sign in");
-  await signIn.click();
+  await signInViaPage(page);
+  // v8 Part 0b: a new account with an empty cloud is asked first; the untouched sample isn't uploaded until it answers.
+  await page.getByTestId("first-choice-samples").click();
   await expect(account(page)).toHaveAttribute("data-sync", "saved");
   await expect(account(page)).toHaveAccessibleName(/Account: Asha Rao\. Saved to cloud/);
   expect(cloud.puts).toEqual([{ key: "wedding", baseVersion: 0, title: expect.any(String) }]);
@@ -129,9 +153,13 @@ test("mocked sign-in: first save creates the cloud copy, edits autosave with com
   await expect(page.getByTestId("cloud-panel")).toContainText("Asha Rao");
   await expect(page.getByTestId("cloud-status-text")).toHaveText("Saved to cloud");
   await page.getByTestId("cloud-signout").click();
-  await expect(page.getByTestId("cloud-signin")).toBeVisible();
-  // The local plan is untouched by signing out.
+  // v8: signed out on a device that was signed in: the sign-in page comes first and the plan stays hidden...
+  await expect(page).toHaveURL(/\/signin$/);
+  await expect(page.getByTestId("dashboard")).toHaveCount(0);
+  // ...until "Use without an account"; the local plan is untouched by signing out.
+  await page.getByTestId("signin-skip").click();
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Cloud saved wedding");
+  await expect(page.getByTestId("cloud-signin")).toBeVisible();
 });
 
 test("cloud copy differs on sign-in: choose; Use cloud copy loads it and is one Undo away", async ({ page }) => {
@@ -144,7 +172,7 @@ test("cloud copy differs on sign-in: choose; Use cloud copy loads it and is one 
   cloud.docs.set("wedding", { version: 3, updatedAt: "2026-10-22T08:30:00.000Z", plan: { ...plan, event: { ...plan.event, title: "From my laptop" } } });
   const before = await page.getByRole("heading", { level: 1 }).textContent();
 
-  await page.getByTestId("cloud-signin").click();
+  await signInViaPage(page);
   const dialog = page.getByTestId("cloud-choice-dialog");
   await expect(dialog).toBeVisible();
   await expect(page.getByRole("dialog", { name: "Which version should we keep?" })).toBeVisible();
@@ -163,6 +191,7 @@ test("cloud copy differs on sign-in: choose; Use cloud copy loads it and is one 
 
 test("a 409 on autosave asks again; Keep this device's plan overwrites the cloud on its current version", async ({ page }) => {
   await mockAuth(page, true);
+  await samplesChosen(page);
   const cloud = await fakeCloud(page);
   await page.goto("/");
   await expect(account(page)).toHaveAttribute("data-sync", "saved");
@@ -188,14 +217,22 @@ test("a 409 on autosave asks again; Keep this device's plan overwrites the cloud
 
 test("offline: status says the plan is saved on this device, and saving resumes on retry", async ({ page }) => {
   await mockAuth(page, true);
+  await samplesChosen(page);
   const cloud = await fakeCloud(page, { offline: true });
   await page.goto("/");
   await expect(account(page)).toHaveAttribute("data-sync", "offline");
   await account(page).click();
   await expect(page.getByTestId("cloud-status-text")).toHaveText("Offline – saved on this device");
   cloud.state.offline = false;
-  await page.getByTestId("cloud-retry").click();
-  await expect(account(page)).toHaveAttribute("data-sync", "saved");
+  // Hardened (v8 Part 1b): the panel re-renders while the background retry runs, which detached "Try again" mid-click on
+  // a slow machine. Click it only while it is still offered, and accept the background retry getting there first.
+  await expect(async () => {
+    if ((await account(page).getAttribute("data-sync")) !== "saved") {
+      const retry = page.getByTestId("cloud-retry");
+      if (await retry.isVisible()) await retry.click({ timeout: 2_000 });
+    }
+    await expect(account(page)).toHaveAttribute("data-sync", "saved", { timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
   expect(cloud.docs.get("wedding")?.version).toBe(1);
 });
 
@@ -203,6 +240,7 @@ for (const scheme of ["light", "dark"] as const) {
   test(`signed-in header, account panel and choice dialog are axe-clean in ${scheme} at 1280 and 375 px`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: scheme });
     await mockAuth(page, true);
+    await samplesChosen(page);
     const cloud = await fakeCloud(page);
     for (const width of [1280, 375]) {
       await page.setViewportSize({ width, height: 900 });
@@ -230,3 +268,95 @@ for (const scheme of ["light", "dark"] as const) {
     }
   });
 }
+
+// ---------- v8 Part 0b: the first sign-in choice ----------
+const chooser = (page: Page) => page.getByTestId("first-choice-dialog");
+
+test("first sign-in, empty cloud: the chooser asks once; 'Load sample events' saves the samples and never asks again", async ({ page }) => {
+  await mockAuth(page);
+  const cloud = await fakeCloud(page);
+  await page.goto("/");
+  await signInViaPage(page);
+  await expect(chooser(page)).toBeVisible();
+  await expect(page.getByRole("dialog", { name: /How would you like to start\?/ })).toBeVisible();
+  await expect(page.getByTestId("first-choice-own")).toBeFocused();
+  // Nothing is written to the account while it waits: the sample on screen is held on this device.
+  await expect(account(page)).toHaveAttribute("data-sync", "sample");
+  expect(cloud.puts).toEqual([]);
+  expect(await axe(page), "chooser").toEqual([]);
+  await page.getByTestId("first-choice-samples").click();
+  await expect(chooser(page)).toHaveCount(0);
+  await expect(account(page)).toHaveAttribute("data-sync", "saved");
+  expect(cloud.puts.map(p => p.key)).toEqual(["wedding"]);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("utsav_first_choice_v1") ?? "{}"))).toEqual({ "e2e-user": "samples" });
+  // Opening another sample now saves it too.
+  await switchEvent(page, "birthday");
+  await expect.poll(() => cloud.puts.map(p => p.key)).toEqual(["wedding", "birthday"]);
+  // The event menu no longer offers loading them again.
+  await page.getByTestId("event-switcher").click();
+  await expect(page.getByTestId("event-load-samples")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.reload();
+  await expect(account(page)).toHaveAttribute("data-sync", "saved");
+  await page.waitForTimeout(800);
+  await expect(chooser(page)).toHaveCount(0);
+});
+
+test("first sign-in, empty cloud: 'Start your own event' opens the blank setup; samples stay out of the account", async ({ page }) => {
+  await mockAuth(page);
+  const cloud = await fakeCloud(page);
+  await page.goto("/");
+  await signInViaPage(page);
+  await expect(chooser(page)).toBeVisible();
+  await page.getByTestId("first-choice-own").click();
+  await expect(chooser(page)).toHaveCount(0);
+  await expect(page).toHaveURL(/\/setup$/);
+  await expect(page.getByText(/New plan · Step 1 of 3/)).toBeVisible();
+  await page.reload();
+  await expect(page.getByText(/New plan · Step 1 of 3/)).toBeVisible();
+  await expect(account(page)).toHaveAttribute("data-sync", "sample");
+  await page.waitForTimeout(800);
+  await expect(chooser(page)).toHaveCount(0);
+  // Browsing a sample doesn't upload it either; "Load sample events" stays in the event menu and the account panel.
+  await page.goto("/");
+  await switchEvent(page, "community");
+  await expect(account(page)).toHaveAttribute("data-sync", "sample");
+  await page.waitForTimeout(2000);
+  expect(cloud.puts).toEqual([]);
+  await account(page).click();
+  await expect(page.getByTestId("cloud-status-text")).toHaveText("Sample – not saved to your account");
+  await expect(page.getByTestId("cloud-load-samples")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.getByTestId("event-switcher").click();
+  await page.getByTestId("event-load-samples").click();
+  await expect(account(page)).toHaveAttribute("data-sync", "saved");
+  expect(cloud.puts.map(p => p.key)).toEqual(["community"]);
+});
+
+test("first sign-in with an edited sample on this device: no chooser, the usual sync uploads it", async ({ page }) => {
+  await mockAuth(page);
+  const cloud = await fakeCloud(page);
+  await page.goto("/");
+  await renameEvent(page, "My edited wedding");
+  await signInViaPage(page);
+  await expect(account(page)).toHaveAttribute("data-sync", "saved");
+  expect(cloud.puts).toEqual([{ key: "wedding", baseVersion: 0, title: "My edited wedding" }]);
+  await page.waitForTimeout(800);
+  await expect(chooser(page)).toHaveCount(0);
+});
+
+test("first sign-in when the account already has plans: no chooser", async ({ page }) => {
+  await mockAuth(page);
+  const cloud = await fakeCloud(page);
+  await page.goto("/");
+  // Switching saves the (still untouched) samples locally, so there is a plan to seed the cloud copy from.
+  await switchEvent(page, "birthday");
+  await switchEvent(page, "wedding");
+  const plan = await localPlan(page);
+  cloud.docs.set("birthday", { version: 2, updatedAt: "Thu 2026-10-22 2:00 PM IST (UTC+05:30)", plan: { ...plan, event: { ...plan.event, title: "x" } } });
+  await signInViaPage(page);
+  await expect(account(page)).toHaveAttribute("data-sync", "sample");
+  await page.waitForTimeout(800);
+  await expect(chooser(page)).toHaveCount(0);
+  expect(cloud.puts).toEqual([]);
+});

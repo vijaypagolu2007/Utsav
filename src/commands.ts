@@ -1,7 +1,9 @@
 // One command language and one pure reducer. Gemini function calls and CopilotKit actions
 // both reach the state only through applyBatch(), so the same command always yields the same state.
 import { z } from "zod";
-import { AgentState, BudgetItem, ExperienceLevel, IdeaKind, IsoDate, MinuteOfDay, Money, PermitStatus, QuoteBasis, RsvpStatus, SponsorStatus, SponsorTier, TaskStatus, VendorStage } from "./schema";
+import { AgentState, BudgetItem, ExperienceLevel, IdeaKind, IsoDate, MinuteOfDay, Money, PermitStatus, Priority, QuoteBasis, RSVP_LOG_CAP, JOIN_RECORDS_CAP, RsvpStatus, SponsorStatus, SponsorTier, TaskStatus, VendorStage, RsvpAnswer, RsvpMeal, RSVP_ENTRIES_CAP, RSVP_MAX_PARTY, RSVP_NAME_MAX, type ChangeSource, type RsvpEntry, type RsvpLogEntry, type WishlistItem } from "./schema";
+import { normalizePhone } from "./phone";
+import { ANSWER_LABEL, istToUtcIso, MEAL_LABEL, RSVP_CLOSED_MESSAGE, RSVP_ENTRY_ID, RSVP_REMOVED_MESSAGE, rsvpClosed, rsvpFunctions, formatIst } from "./rsvp";
 import { slotByKey } from "./config/vendor-checklist";
 import { isDefaultPriorities, planPriorityCut, spreadOverSlack } from "./priorities";
 
@@ -251,6 +253,211 @@ export const SetTaskDependency = z.object({
   dependsOn: z.array(z.string().min(1)).max(20).describe("Task ids that must be done first ([] clears). Cycles are refused"),
 }).describe("Organizer only. Say which tasks must be done before this one.");
 
+/**
+ * v8 Part 0c. The reducer never deletes anything: this op changes no plan data. An approved delete_event card asks the
+ * organizer to confirm in the app, which moves the event to Recently deleted (src/trash.ts). Always Tier 2, alone in
+ * its batch, organiser only.
+ */
+export const DeleteEvent = z.object({
+  op: z.literal("delete_event"),
+  reason: z.string().max(200).optional().describe("Why, in the user's words (optional)"),
+}).describe("Organizer only. Propose deleting the event on screen. Nothing is deleted until the organizer approves the card and confirms; it can be restored for 30 days. Never combine with other changes.");
+
+
+// ---------- v8 Part 1: the guest list, the group join queue and the gift wishlist / registry ----------
+/** Limits that keep a shared plan well under its 400 KB cap and a single approval card readable. */
+export const GUEST_LIMITS = { maxImport: 300, maxGuests: 1500, maxHouseholds: 1000, maxHouseholdSize: 20, maxPendingJoins: 50, maxWishlist: 100, maxWishRupees: 10_000_000 } as const;
+const PersonName = z.string().trim().min(1, "Name can't be empty").max(MAX_NAME_LENGTH, `Keep it under ${MAX_NAME_LENGTH} characters`);
+const Side = z.string().trim().max(40);
+/** A phone as typed; the reducer normalises it to E.164 (India default) and refuses one that isn't a number. */
+const PhoneInput = z.string().trim().max(40);
+const EmailInput = z.string().trim().max(254).refine(v => v === "" || /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(v), "Not an email address");
+const AgeGroup = z.enum(["adult", "child", "infant"]);
+const InvitedTo = z.array(Ref).max(30).describe("Sub-events (slugs) this guest is invited to. Leave out to invite them to every sub-event that collects RSVPs");
+
+export const AddHousehold = z.object({
+  op: z.literal("add_household"),
+  label: PersonName.describe("Household name, e.g. 'Rao family'"),
+  side: Side.optional().describe("bride, groom, friends, school, ..."),
+  phone: PhoneInput.optional().describe("WhatsApp number as written; the tool normalises it"),
+  email: EmailInput.optional(),
+  members: z.array(z.object({ name: PersonName, ageGroup: AgeGroup.optional() })).max(GUEST_LIMITS.maxHouseholdSize).optional().describe("The people in it"),
+  invitedTo: InvitedTo.optional(),
+}).describe("Organizer only. Add a household (and its members) to the guest list.");
+
+export const UpdateHousehold = z.object({
+  op: z.literal("update_household"),
+  householdId: z.string().min(1),
+  label: PersonName.optional(),
+  side: Side.optional(),
+  phone: PhoneInput.optional().describe("\"\" clears it"),
+  email: EmailInput.optional(),
+}).describe("Organizer only. Change a household's name, side, phone or email.");
+
+export const RemoveHousehold = z.object({
+  op: z.literal("remove_household"),
+  householdId: z.string().min(1),
+}).describe("Organizer only. Remove a household and everyone in it (their gift claims are released).");
+
+export const AddGuest = z.object({
+  op: z.literal("add_guest"),
+  householdId: z.string().min(1),
+  name: PersonName,
+  ageGroup: AgeGroup.optional(),
+  isPlusOne: z.boolean().optional(),
+  invitedTo: InvitedTo.optional(),
+}).describe("Organizer only. Add a person to an existing household.");
+
+export const UpdateGuest = z.object({
+  op: z.literal("update_guest"),
+  guestId: z.string().min(1),
+  name: PersonName.optional(),
+  ageGroup: AgeGroup.optional(),
+  householdId: z.string().min(1).optional().describe("Move them to another household"),
+  invitedTo: InvitedTo.optional().describe("Replace the sub-events they're invited to; answers already given are kept"),
+}).describe("Organizer only. Edit a guest.");
+
+export const RemoveGuest = z.object({
+  op: z.literal("remove_guest"),
+  guestId: z.string().min(1),
+}).describe("Organizer only. Remove one guest (their gift claim is released; the household stays).");
+
+export const ImportEntry = z.object({
+  name: PersonName,
+  phone: PhoneInput.optional().describe("As written; normalised and used to skip duplicates"),
+  email: z.string().trim().max(254).optional(),
+  household: z.string().trim().max(MAX_NAME_LENGTH).optional().describe("Group several people into one household by giving the same name"),
+  side: Side.optional(),
+});
+export const ImportGuests = z.object({
+  op: z.literal("import_guests"),
+  entries: z.array(ImportEntry).min(1).max(GUEST_LIMITS.maxImport),
+  source: z.enum(["paste", "vcf", "contacts", "ai"]).default("paste"),
+}).describe("Organizer only. Add many guests at once (one household each unless `household` groups them). Duplicates by phone are skipped. Always shown as one approval card.");
+
+export const RequestJoin = z.object({
+  op: z.literal("request_join"),
+  requestId: z.string().regex(/^[A-Za-z0-9_-]{8,40}$/),
+  name: z.string().trim().min(1).max(80),
+  size: z.number().int().min(1).max(GUEST_LIMITS.maxHouseholdSize),
+  phone: PhoneInput.optional(),
+  at: z.string().max(40),
+}).describe("Public, join endpoint only. A pending request to be added to the guest list.");
+
+export const ApproveJoinRequest = z.object({
+  op: z.literal("approve_join_request"),
+  requestId: z.string().min(1),
+  side: Side.optional(),
+}).describe("Organizer only. Approve a pending join request: it becomes a household with its own private RSVP link.");
+
+export const RejectJoinRequest = z.object({
+  op: z.literal("reject_join_request"),
+  requestId: z.string().min(1),
+}).describe("Organizer only. Decline a pending join request (its phone number is deleted).");
+
+/**
+ * A wishlist link: https only, no user:password@, no bare IP address or localhost, at most 500 characters. Links are only
+ * ever rendered for a person to click (rel="noopener noreferrer nofollow"); the server never fetches them, so there is no
+ * SSRF surface, and refusing other schemes keeps javascript: and data: URLs out of the guest page.
+ */
+export function isSafeWishlistUrl(raw: string): boolean {
+  if (raw.length > 500 || /\s/.test(raw)) return false;
+  let u: URL;
+  try { u = new URL(raw); } catch { return false; }
+  if (u.protocol !== "https:" || u.username || u.password) return false;
+  const h = u.hostname.toLowerCase();
+  if (!h.includes(".") || h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local") || h.endsWith(".internal")) return false;
+  if (/^\d+(\.\d+){3}$/.test(h) || h.startsWith("[")) return false; // IPv4 / IPv6 literals
+  return true;
+}
+const WishUrl = z.string().trim().max(500).refine(v => v === "" || isSafeWishlistUrl(v), "Use a full https:// shop link (no other kinds of link)");
+const WishRupees = z.number().int().min(0).max(GUEST_LIMITS.maxWishRupees).describe("Approximate price in whole rupees, as the user said it; the tool converts");
+
+export const AddWishlistItem = z.object({
+  op: z.literal("add_wishlist_item"),
+  item: z.string().trim().min(1).max(MAX_NAME_LENGTH),
+  url: WishUrl.optional(),
+  approxRupees: WishRupees.optional(),
+  priority: Priority.optional(),
+}).describe("Organizer only. Add a gift to the birthday wishlist or the wedding registry.");
+
+export const UpdateWishlistItem = z.object({
+  op: z.literal("update_wishlist_item"),
+  itemId: z.string().min(1),
+  item: z.string().trim().min(1).max(MAX_NAME_LENGTH).optional(),
+  url: WishUrl.optional().describe("\"\" removes the link"),
+  approxRupees: WishRupees.nullable().optional().describe("null removes the price"),
+  priority: Priority.optional(),
+}).describe("Organizer only. Edit a wishlist or registry gift.");
+
+export const RemoveWishlistItem = z.object({
+  op: z.literal("remove_wishlist_item"),
+  itemId: z.string().min(1),
+}).describe("Organizer only. Remove a gift from the wishlist or registry.");
+
+export const SetWishlistSurprise = z.object({
+  op: z.literal("set_wishlist_surprise"),
+  on: z.boolean(),
+}).describe("Organizer only. Surprise mode: the public link hides which gifts are claimed, and the organiser view hides who claimed them.");
+
+export const UnclaimWishlistItem = z.object({
+  op: z.literal("unclaim_wishlist_item"),
+  itemId: z.string().min(1),
+  guestId: z.string().min(1).describe("The guest who claimed it; only their own claim can be released"),
+}).describe("Release your own gift claim.");
+
+// ---------- v8 Part 1c: the open RSVP list ----------
+const EntryId = z.string().regex(RSVP_ENTRY_ID, "Not an RSVP entry id");
+/**
+ * A guest's RSVP from the open link (the server's /rsvp endpoint), or from Guest View / the guest Co-Pilot in the organizer's
+ * app. Creates the entry when entryId is new, otherwise updates it. The server picks entryId from the device token and is
+ * the only caller that may set duplicateOf (same phone from another device).
+ */
+export const SubmitRsvpEntry = z.object({
+  op: z.literal("submit_rsvp_entry"),
+  entryId: EntryId.describe("The RSVP being answered: the acting guest's own entry id, or a new id for a new RSVP"),
+  name: z.string().trim().min(1, "Enter your name").max(RSVP_NAME_MAX, `Keep the name under ${RSVP_NAME_MAX} characters`),
+  phone: z.string().trim().max(40).optional().describe("As typed (Indian numbers need no +91). Leave out to keep the one on file"),
+  partySize: z.number().int().min(1).max(RSVP_MAX_PARTY).default(1).describe("People in this RSVP, the guest included"),
+  kids: z.number().int().min(0).max(RSVP_MAX_PARTY).optional().describe("Children among them (only when the organizer asks)"),
+  functions: z.array(Ref).max(30).default([]).describe("Sub-events (slugs) this party is attending"),
+  meal: RsvpMeal,
+  answer: RsvpAnswer,
+  duplicateOf: z.string().max(60).nullable().optional().describe("Server only: the entry with the same phone"),
+}).describe("A guest's own RSVP on the open link: name, party size, functions, meal and answer.");
+export const SetRsvpVip = z.object({
+  op: z.literal("set_rsvp_vip"),
+  entryId: EntryId, vip: z.boolean(),
+}).describe("Organizer only. Mark an RSVP as VIP (or not).");
+export const RemoveRsvpEntry = z.object({
+  op: z.literal("remove_rsvp_entry"),
+  entryId: EntryId,
+}).describe("Organizer only. Remove an RSVP (soft delete: it moves to Recently removed and can be restored).");
+export const RestoreRsvpEntry = z.object({
+  op: z.literal("restore_rsvp_entry"),
+  entryId: EntryId,
+}).describe("Organizer only. Bring back a removed RSVP.");
+export const MergeRsvpEntries = z.object({
+  op: z.literal("merge_rsvp_entries"),
+  keepId: EntryId.describe("The RSVP whose answers are kept (usually the newest)"),
+  dropId: EntryId.describe("The duplicate that is folded into it"),
+}).describe("Organizer only. Merge two RSVPs for the same family: keepId's answers stay; dropId is removed and its device now edits keepId.");
+const HHMM = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use HH:MM (24-hour)");
+export const SetRsvpSettings = z.object({
+  op: z.literal("set_rsvp_settings"),
+  closesOn: IsoDate.nullable().optional().describe("Last day guests can answer, in India time (YYYY-MM-DD as the user said it); null removes the close date"),
+  closesTime: HHMM.optional().describe("Closing time that day in India time, 24-hour; default 23:59"),
+  askKids: z.boolean().optional().describe("Ask guests how many of their party are children"),
+}).describe("Organizer only. The open RSVP form's close date (IST; the tool converts) and whether it asks for a kids count.");
+/** v8 Part 1c organizer ops on the RSVP list: never run for a guest, and an AI proposal with one is always an approval card. */
+export const RSVP_ORGANIZER_OPS: ReadonlySet<string> = new Set(["set_rsvp_vip", "remove_rsvp_entry", "restore_rsvp_entry", "merge_rsvp_entries", "set_rsvp_settings"]);
+
+/** v8 Part 1 organiser ops: an AI proposal containing one is always an approval card. */
+export const GUEST_LIST_OPS: ReadonlySet<string> = new Set(["add_household", "update_household", "remove_household", "add_guest", "update_guest", "remove_guest",
+  "import_guests", "approve_join_request", "reject_join_request", "add_wishlist_item", "update_wishlist_item", "remove_wishlist_item", "set_wishlist_surprise"]);
+/** Ops that only the public join endpoint may run (BatchSource "join"); nothing else can, and that source can run nothing else. */
+export const JOIN_ONLY_OPS: ReadonlySet<string> = new Set(["request_join"]);
+
 /** v6 ops: organiser only, and an AI proposal containing one is always shown as an approval card. */
 export const V6_OPS: ReadonlySet<string> = new Set(["set_priorities", "add_vendor", "set_vendor_stage", "remove_vendor", "set_vendor_need", "set_task_dependency"]);
 
@@ -258,7 +465,7 @@ export const V6_OPS: ReadonlySet<string> = new Set(["set_priorities", "add_vendo
 export const DIRECT_EDIT_OPS: ReadonlySet<string> = new Set(["rename_event", "set_partner_names", "rename_entity", "set_planned_amount", "save_idea", "dismiss_idea"]);
 /** Ops only the organiser may run, whoever built the batch. Listed so the guest check is explicit, not implied. */
 export const ORGANIZER_ONLY_OPS: ReadonlySet<string> = new Set(["add_budget_item", "remove_budget_item", "set_event_basics", "rebalance_budget",
-  "add_ideas", "save_idea", "dismiss_idea", "adopt_idea", ...V6_OPS]);
+  "add_ideas", "save_idea", "dismiss_idea", "adopt_idea", "delete_event", ...V6_OPS, ...GUEST_LIST_OPS, ...RSVP_ORGANIZER_OPS]);
 
 /** The commands the AI may propose (declared to Gemini). Unchanged by the direct-edit ops. */
 export const AgentCommand = z.discriminatedUnion("op", [
@@ -266,7 +473,10 @@ export const AgentCommand = z.discriminatedUnion("op", [
   SetItemLock, ClaimWishlistItem, SetPermitStatus, UpdateSponsor,
   UpsertVendorQuote, SetGuestDiet, CommunitySignup, SetSubEventVisibility,
   AddBudgetItem, RemoveBudgetItem, SetEventBasics, RebalanceBudget, AdoptIdea,
-  SetPriorities, AddVendor, SetVendorStage, RemoveVendor, SetVendorNeed, SetTaskDependency,
+  SetPriorities, AddVendor, SetVendorStage, RemoveVendor, SetVendorNeed, SetTaskDependency, DeleteEvent,
+  AddHousehold, UpdateHousehold, RemoveHousehold, AddGuest, UpdateGuest, RemoveGuest, ImportGuests, ApproveJoinRequest, RejectJoinRequest,
+  AddWishlistItem, UpdateWishlistItem, RemoveWishlistItem, SetWishlistSurprise, UnclaimWishlistItem,
+  SetRsvpVip, RemoveRsvpEntry, RestoreRsvpEntry, MergeRsvpEntries, SetRsvpSettings,
 ]);
 export const Command = z.discriminatedUnion("op", [
   AdjustBudget, MoveSubEvent, ShiftBlock, SetTaskStatus, RecordPayment, SetRsvp,
@@ -275,7 +485,10 @@ export const Command = z.discriminatedUnion("op", [
   RenameEvent, SetPartnerNames, RenameEntity, SetPlannedAmount,
   AddBudgetItem, RemoveBudgetItem, SetEventBasics, RebalanceBudget,
   AddIdeas, SaveIdea, DismissIdea, AdoptIdea,
-  SetPriorities, AddVendor, SetVendorStage, RemoveVendor, SetVendorNeed, SetTaskDependency,
+  SetPriorities, AddVendor, SetVendorStage, RemoveVendor, SetVendorNeed, SetTaskDependency, DeleteEvent,
+  AddHousehold, UpdateHousehold, RemoveHousehold, AddGuest, UpdateGuest, RemoveGuest, ImportGuests, RequestJoin, ApproveJoinRequest, RejectJoinRequest,
+  AddWishlistItem, UpdateWishlistItem, RemoveWishlistItem, SetWishlistSurprise, UnclaimWishlistItem,
+  SubmitRsvpEntry, SetRsvpVip, RemoveRsvpEntry, RestoreRsvpEntry, MergeRsvpEntries, SetRsvpSettings,
 ]);
 export type Command = z.infer<typeof Command>;
 export type CommandInput = z.input<typeof Command>;
@@ -291,13 +504,21 @@ export const AgentBatch = z.object({
   commands: z.array(AgentCommand).min(1).max(20),
   summary: z.string().describe("One line that echoes the change back to the user"),
 });
-/** Who built the batch. Direct edits need "ui"; everything else behaves the same for both. */
-export type BatchSource = "agent" | "ui";
+/**
+ * Who built the batch. Direct edits need "ui". v8 Part 1: "guest_link" is the server's guest endpoint and "join" is the
+ * public join endpoint, the only source request_join runs from. v8 Part 1c: "rsvp_link" is the open RSVP endpoint, the
+ * only source that may flag a possible duplicate. Otherwise they behave like "agent".
+ */
+export type BatchSource = "agent" | "ui" | "guest_link" | "join" | "rsvp_link";
 
 // ---------- roles ----------
 export type Role = "organizer" | "guest";
-/** Guest / Committee Concierge mode may only run these. Everything else is refused at the reducer boundary. */
-export const GUEST_ALLOWED_OPS: ReadonlySet<Command["op"]> = new Set(["set_rsvp", "set_guest_diet", "claim_wishlist_item", "community_signup"]);
+/**
+ * Guest / Committee Concierge mode (and every guest link) may only run these. Everything else is refused at the reducer
+ * boundary. v8 Part 1c keeps it tight: a guest answers with their own RSVP entry, claims or releases a gift for that entry,
+ * or signs up to volunteer; request_join additionally needs the join endpoint's source (JOIN_ONLY_OPS).
+ */
+export const GUEST_ALLOWED_OPS: ReadonlySet<Command["op"]> = new Set(["submit_rsvp_entry", "claim_wishlist_item", "community_signup", "request_join"]);
 
 // ---------- helpers ----------
 /** How an adopted idea reads as a task, and how many days before its sub-event it is due. Code decides, never the LLM. */
@@ -411,8 +632,155 @@ export function categoryMaxCuttable(st: AgentState, subEventId: string | null = 
   return out;
 }
 
+// ---------- v8 Part 1 helpers: guest list, change log, wishlist ----------
+/** A household label not used yet ("Ravi", then "Ravi (2)"). */
+function uniqueLabel(st: AgentState, label: string): string {
+  let out = label, n = 2;
+  while (st.households.some(h => sameText(h.label, out))) out = `${label} (${n++})`;
+  return out;
+}
+export type ImportRowStatus = "new" | "duplicate" | "invalid";
+export type ImportPlan = {
+  households: AgentState["households"]; guests: AgentState["guests"];
+  /** One per entry, in order: what happens to it and why. */
+  rows: { status: ImportRowStatus; reason: string; phone: string; householdId: string | null }[];
+  duplicates: number; invalid: number;
+};
+/**
+ * The import, decided: shared by the reducer (import_guests) and the preview, so what the organiser previews is exactly
+ * what Approve commits. Each entry becomes its own household unless `household` names one (existing or earlier in the
+ * batch). Duplicates: the same E.164 phone or email as a household already on the list or an earlier entry. Entries with
+ * neither are deduped by name within the batch only (two different people can share a name).
+ */
+export function planImport(st: AgentState, entries: z.input<typeof ImportEntry>[]): ImportPlan {
+  const phones = new Map(st.households.filter(h => h.phone).map(h => [toE164Loose(h.phone), h.label]));
+  const emails = new Map(st.households.filter(h => h.email).map(h => [h.email.toLowerCase(), h.label]));
+  const batchNames = new Set<string>();
+  const hhByLabel = new Map(st.households.map(h => [h.label.trim().toLowerCase(), h.id]));
+  const households: AgentState["households"] = [], guests: AgentState["guests"] = [];
+  const takenH = new Set(st.households.map(h => h.id)), takenG = new Set(st.guests.map(g => g.id));
+  const labels = new Set(st.households.map(h => h.label.trim().toLowerCase()));
+  const rsvp = invitesFor(st, undefined);
+  const rows: ImportPlan["rows"] = [];
+  let duplicates = 0, invalid = 0;
+  for (const e of entries) {
+    const name = (e.name ?? "").trim();
+    if (!name) { invalid++; rows.push({ status: "invalid", reason: "No name", phone: "", householdId: null }); continue; }
+    let phone = "";
+    if (e.phone && e.phone.trim()) {
+      const p = normalizePhone(e.phone);
+      if (!p.ok) { invalid++; rows.push({ status: "invalid", reason: `Phone: ${p.reason}`, phone: "", householdId: null }); continue; }
+      phone = p.e164;
+    }
+    const email = (e.email ?? "").trim().toLowerCase();
+    const dupOf = (phone && phones.get(phone)) || (email && emails.get(email)) || (!phone && !email && batchNames.has(name.toLowerCase()) ? name : "");
+    if (dupOf) { duplicates++; rows.push({ status: "duplicate", reason: `Already on the list (${dupOf})`, phone, householdId: null }); continue; }
+    const hLabel = (e.household ?? "").trim() || name;
+    const key = hLabel.toLowerCase();
+    let hid = e.household?.trim() ? hhByLabel.get(key) : undefined;
+    if (!hid) {
+      let label = hLabel, n = 2;
+      while (labels.has(label.toLowerCase())) label = `${hLabel} (${n++})`;
+      labels.add(label.toLowerCase());
+      hid = uniqueId(`hh-${slug(label).slice(0, 32)}`, x => takenH.has(x)); takenH.add(hid);
+      households.push({ id: hid, label, side: e.side?.trim() ?? "", inviteCode: "", phone, email: e.email?.trim() ?? "" });
+      hhByLabel.set(key, hid);
+    } else {
+      const h = households.find(x => x.id === hid);
+      if (h && !h.phone && phone) h.phone = phone; // a new household picks up the first phone given for it
+    }
+    const gid = uniqueId(`g-${slug(name).slice(0, 32)}`, x => takenG.has(x)); takenG.add(gid);
+    guests.push({ id: gid, householdId: hid, name, ageGroup: "adult", isPlusOne: false, diet: [], rsvp: { ...rsvp } });
+    if (phone) phones.set(phone, name);
+    if (email) emails.set(email, name);
+    batchNames.add(name.toLowerCase());
+    rows.push({ status: "new", reason: e.household?.trim() ? `Joins "${hLabel}"` : "New household", phone, householdId: hid });
+  }
+  return { households, guests, rows, duplicates, invalid };
+}
+/** Households saved before v8 may hold a phone as typed; compare them in E.164 when they parse. */
+const toE164Loose = (raw: string) => { const r = normalizePhone(raw); return r.ok ? r.e164 : raw; };
+
+type ApplyCtx = { source: BatchSource; now?: string; actorEntryId?: string | null };
+type Ext = AgentState["event"]["ext"];
+type WishExt = Extract<Ext, { type: "birthday" | "wedding" }>;
+/** The wishlist lives on birthdays (wishlist) and weddings (gift registry); community events have none. */
+function wishExt(st: AgentState): WishExt {
+  const x = st.event.ext;
+  if (x.type !== "birthday" && x.type !== "wedding") throw new PlanError("Wishlists exist on birthday and wedding events only");
+  return x;
+}
+const withWishlist = (st: AgentState, x: WishExt, wishlist: WishlistItem[], extra: Partial<WishExt> = {}): AgentState =>
+  ({ ...st, event: { ...st.event, ext: { ...x, ...extra, wishlist } as WishExt } });
+/** Release every gift claimed by one of `guestIds` (they are leaving the list). */
+function releaseClaims(st: AgentState, guestIds: Set<string>): AgentState {
+  const x = st.event.ext;
+  if (x.type !== "birthday" && x.type !== "wedding") return st;
+  if (!x.wishlist.some(w => w.claimedByGuestId && guestIds.has(w.claimedByGuestId))) return st;
+  return withWishlist(st, x, x.wishlist.map(w => (w.claimedByGuestId && guestIds.has(w.claimedByGuestId) ? { ...w, claimedByGuestId: null } : w)));
+}
+/** Which door a change came through, for the change log. */
+export function changeSourceOf(role: Role, source: BatchSource): ChangeSource {
+  if (source === "guest_link") return "guest_link";
+  if (role === "guest") return "guest_preview";
+  return source === "ui" ? "organizer" : "copilot";
+}
+/**
+ * Append one RSVP or diet change to the organizer's change log. Only when the caller passed `now` (the app and the server
+ * do; dry runs and previews don't), so the reducer stays pure: the same input, including `now`, gives the same log.
+ */
+function logChange(st: AgentState, ctx: ApplyCtx, role: Role, g: AgentState["guests"][number], field: RsvpLogEntry["field"], subEventId: string | null, before: string, after: string): AgentState {
+  if (!ctx.now || before === after) return st;
+  const hh = st.households.find(h => h.id === g.householdId);
+  const base = `rl-${ctx.now.replace(/[^0-9]/g, "").slice(0, 17)}-${g.id}-${field}${subEventId ? `-${subEventId}` : ""}`;
+  const id = uniqueId(base, x => st.rsvpLog.some(e => e.id === x));
+  const entry: RsvpLogEntry = { id, at: ctx.now, householdId: g.householdId, householdLabel: hh?.label ?? "", guestId: g.id, guestName: g.name,
+    field, subEventId, before: before.slice(0, 200), after: after.slice(0, 200), source: changeSourceOf(role, ctx.source) };
+  return { ...st, rsvpLog: [...st.rsvpLog, entry].slice(-RSVP_LOG_CAP) };
+}
+/** Every sub-event that collects RSVPs, or the named ones: the invitation map a new guest starts with. */
+function invitesFor(st: AgentState, refs: string[] | undefined): Record<string, "invited"> {
+  const ids = refs ? refs.map(r => findSubEvent(st, r).id) : st.subEvents.filter(s => s.collectsRsvp).map(s => s.id);
+  return Object.fromEntries([...new Set(ids)].map(id => [id, "invited" as const]));
+}
+/** Normalise an optional phone; a value that isn't a number is an error the organiser sees. */
+function phoneOf(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined;
+  if (raw.trim() === "") return "";
+  const r = normalizePhone(raw);
+  if (!r.ok) throw new PlanError(`"${raw}" isn't a phone number (${r.reason})`);
+  return r.e164;
+}
+function assertRoom(st: AgentState, households: number, guests: number) {
+  if (st.households.length + households > GUEST_LIMITS.maxHouseholds) throw new PlanError(`The guest list is limited to ${GUEST_LIMITS.maxHouseholds} households`);
+  if (st.guests.length + guests > GUEST_LIMITS.maxGuests) throw new PlanError(`The guest list is limited to ${GUEST_LIMITS.maxGuests} guests`);
+}
+const sameText = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+const phoneClash = (st: AgentState, phone: string, exceptId: string | null) => (phone ? st.households.find(h => h.id !== exceptId && h.phone && toE164Loose(h.phone) === phone) : undefined);
+/** Join requests: drop decided ones (oldest first) when the queue is full of history. */
+function capJoinRecords(list: AgentState["joinRequests"]): AgentState["joinRequests"] {
+  let out = list;
+  while (out.length > JOIN_RECORDS_CAP) {
+    const i = out.findIndex(r => r.status !== "pending");
+    if (i < 0) break;
+    out = out.filter((_, k) => k !== i);
+  }
+  return out;
+}
+
+/** A live RSVP entry (not removed, not merged), or a PlanError. */
+function rsvpEntryOf(st: AgentState, id: string): RsvpEntry {
+  const e = st.rsvpEntries.find(x => x.id === id);
+  if (!e) throw new PlanError(`No RSVP ${id}`);
+  if (e.mergedInto) throw new PlanError(`${e.name}'s RSVP was merged into another one`);
+  if (e.removedAt) throw new PlanError(`${e.name}'s RSVP was removed (restore it first)`);
+  return e;
+}
+/** Approval cards and logs show only the last four digits of an RSVP phone. */
+const maskPhoneShort = (e164: string) => `(phone ending ${e164.slice(-4)})`;
+
 // ---------- reducer ----------
-function apply(st: AgentState, c: Command, log: string[], role: Role = "organizer"): AgentState {
+function apply(st: AgentState, c: Command, log: string[], role: Role = "organizer", ctx: ApplyCtx = { source: "agent" }): AgentState {
   switch (c.op) {
     case "adjust_budget": {
       const se = c.subEvent ? findSubEvent(st, c.subEvent).id : null;
@@ -469,7 +837,8 @@ function apply(st: AgentState, c: Command, log: string[], role: Role = "organize
       if (!g) throw new PlanError(`No guest ${c.guestId}`);
       if (role === "guest" && !(sid in g.rsvp)) throw new PlanError(`${g.name} isn't invited to ${findSubEvent(st, c.subEvent).name}; only the organiser can add invitations`);
       log.push(`${g.name} · ${c.subEvent}: ${c.answer}`);
-      return { ...st, guests: st.guests.map(x => x.id === c.guestId ? { ...x, rsvp: { ...x.rsvp, [sid]: c.answer } } : x) };
+      const next = { ...st, guests: st.guests.map(x => x.id === c.guestId ? { ...x, rsvp: { ...x.rsvp, [sid]: c.answer } } : x) };
+      return logChange(next, ctx, role, g, "rsvp", sid, g.rsvp[sid] ?? "not invited", c.answer);
     }
     case "set_sub_event_visibility": {
       if (role === "guest") throw new PlanError("Only the organiser can change who sees a sub-event");
@@ -485,15 +854,19 @@ function apply(st: AgentState, c: Command, log: string[], role: Role = "organize
       return { ...st, budgetItems: st.budgetItems.map(x => x.id === b.id ? { ...x, locked: c.locked } : x) };
     }
     case "claim_wishlist_item": {
-      const ext = st.event.ext;
-      if (ext.type !== "birthday") throw new PlanError("Wishlist only exists on birthday events");
+      const ext = wishExt(st);
       const w = ext.wishlist.find(x => x.id === c.itemId);
       if (!w) throw new PlanError(`No wishlist item ${c.itemId}`);
-      if (c.guestId !== null && !st.guests.some(g => g.id === c.guestId)) throw new PlanError(`No guest ${c.guestId}`);
-      if (role === "guest" && w.claimedByGuestId && w.claimedByGuestId !== c.guestId)
-        throw new PlanError(`"${w.item}" is already claimed by ${st.guests.find(g => g.id === w.claimedByGuestId)?.name ?? "another guest"}`);
-      log.push(`Wishlist "${w.item}": ${c.guestId ? `claimed by ${st.guests.find(g => g.id === c.guestId)!.name}` : "released"}`);
-      return { ...st, event: { ...st.event, ext: { ...ext, wishlist: ext.wishlist.map(x => x.id === w.id ? { ...x, claimedByGuestId: c.guestId } : x) } } };
+      // v8 Part 1c: a claim is made for a guest on the optional guest list or for an RSVP entry from the open link.
+      const who = c.guestId === null ? null : st.guests.find(g => g.id === c.guestId)?.name ?? st.rsvpEntries.find(e => e.id === c.guestId && !e.removedAt && !e.mergedInto)?.name;
+      if (c.guestId !== null && !who) throw new PlanError(`No guest ${c.guestId}`);
+      if (role === "guest" && w.claimedByGuestId && w.claimedByGuestId !== c.guestId && c.guestId !== null)
+        throw new PlanError(`"${w.item}" is already claimed by another guest`);
+      // A guest releases only their own claim (guestId null; runBatch checks the claim is theirs). Guests never learn who
+      // else claimed a gift (privacy), so a guest's own log line names nobody else either.
+      if (role === "guest" && c.guestId === null && w.claimedByGuestId === null) { log.push(`"${w.item}" is not claimed`); return st; }
+      log.push(`Wishlist "${w.item}": ${c.guestId ? `claimed by ${who}` : "released"}`);
+      return withWishlist(st, ext, ext.wishlist.map(x => x.id === w.id ? { ...x, claimedByGuestId: c.guestId } : x));
     }
     case "set_permit_status": {
       const ext = st.event.ext;
@@ -853,6 +1226,11 @@ function apply(st: AgentState, c: Command, log: string[], role: Role = "organize
       log.push(`${slot.label}: ${c.needed ? "needed again" : "not needed"}`);
       return { ...st, vendorChecklist: { ...st.vendorChecklist, notNeeded: [...off].sort() } };
     }
+    case "delete_event": {
+      if (role === "guest") throw new PlanError("Only the organiser can delete an event");
+      log.push(`Delete "${st.event.title}": it moves to Recently deleted for 30 days (you confirm in the app first)`);
+      return st;
+    }
     case "set_task_dependency": {
       if (role === "guest") throw new PlanError("Only the organiser can change task dependencies");
       const t = st.tasks.find(x => x.id === c.taskId);
@@ -876,12 +1254,290 @@ function apply(st: AgentState, c: Command, log: string[], role: Role = "organize
       log.push(deps.length ? `"${t.title}" now waits for ${names.join(", ")}` : `"${t.title}" no longer waits for another task`);
       return { ...st, tasks: st.tasks.map(x => x.id === t.id ? { ...x, dependsOn: deps } : x) };
     }
+    // ---------- v8 Part 1: guest list ----------
+    case "add_household": {
+      if (role === "guest") throw new PlanError("Only the organiser can add households");
+      const label = c.label.trim();
+      if (st.households.some(h => sameText(h.label, label))) throw new PlanError(`There is already a household called "${label}"`);
+      const phone = phoneOf(c.phone) ?? "";
+      const clash = phoneClash(st, phone, null);
+      if (clash) throw new PlanError(`That number is already on the list (${clash.label})`);
+      const members = c.members ?? [];
+      assertRoom(st, 1, members.length);
+      const id = uniqueId(`hh-${slug(label).slice(0, 32)}`, x => st.households.some(h => h.id === x));
+      const rsvp = invitesFor(st, c.invitedTo);
+      const taken = new Set(st.guests.map(g => g.id));
+      const guests = members.map(m => {
+        const gid = uniqueId(`g-${slug(m.name).slice(0, 32)}`, x => taken.has(x)); taken.add(gid);
+        return { id: gid, householdId: id, name: m.name.trim(), ageGroup: m.ageGroup ?? "adult" as const, isPlusOne: false, diet: [], rsvp: { ...rsvp } };
+      });
+      log.push(`Added household "${label}"${members.length ? ` with ${members.length} guest${members.length === 1 ? "" : "s"}` : ""}`);
+      return { ...st, households: [...st.households, { id, label, side: c.side?.trim() ?? "", inviteCode: "", phone, email: c.email?.trim() ?? "" }], guests: [...st.guests, ...guests] };
+    }
+    case "update_household": {
+      if (role === "guest") throw new PlanError("Only the organiser can edit households");
+      const h = st.households.find(x => x.id === c.householdId);
+      if (!h) throw new PlanError(`No household ${c.householdId}`);
+      if (c.label === undefined && c.side === undefined && c.phone === undefined && c.email === undefined) throw new PlanError("Nothing to change");
+      const label = c.label?.trim() ?? h.label;
+      if (c.label !== undefined && st.households.some(x => x.id !== h.id && sameText(x.label, label))) throw new PlanError(`There is already a household called "${label}"`);
+      const phone = phoneOf(c.phone) ?? h.phone;
+      const clash = phoneClash(st, phone, h.id);
+      if (clash) throw new PlanError(`That number is already on the list (${clash.label})`);
+      const next = { ...h, label, side: c.side?.trim() ?? h.side, phone, email: c.email?.trim() ?? h.email };
+      const what = [c.label !== undefined && label !== h.label && "name", c.side !== undefined && next.side !== h.side && "side", phone !== h.phone && "phone", next.email !== h.email && "email"].filter(Boolean);
+      log.push(what.length ? `Household "${label}": updated ${what.join(", ")}` : `Household "${label}" unchanged`);
+      return { ...st, households: st.households.map(x => x.id === h.id ? next : x) };
+    }
+    case "remove_household": {
+      if (role === "guest") throw new PlanError("Only the organiser can remove households");
+      const h = st.households.find(x => x.id === c.householdId);
+      if (!h) throw new PlanError(`No household ${c.householdId}`);
+      const gone = new Set(st.guests.filter(g => g.householdId === h.id).map(g => g.id));
+      log.push(`Removed household "${h.label}"${gone.size ? ` and its ${gone.size} guest${gone.size === 1 ? "" : "s"}` : ""}`);
+      const next = { ...st, households: st.households.filter(x => x.id !== h.id), guests: st.guests.filter(g => !gone.has(g.id)) };
+      return releaseClaims(next, gone);
+    }
+    case "add_guest": {
+      if (role === "guest") throw new PlanError("Only the organiser can add guests");
+      const h = st.households.find(x => x.id === c.householdId);
+      if (!h) throw new PlanError(`No household ${c.householdId}`);
+      if (st.guests.filter(g => g.householdId === h.id).length >= GUEST_LIMITS.maxHouseholdSize) throw new PlanError(`A household can have at most ${GUEST_LIMITS.maxHouseholdSize} people`);
+      assertRoom(st, 0, 1);
+      const id = uniqueId(`g-${slug(c.name).slice(0, 32)}`, x => st.guests.some(g => g.id === x));
+      log.push(`Added ${c.name.trim()} to "${h.label}"`);
+      return { ...st, guests: [...st.guests, { id, householdId: h.id, name: c.name.trim(), ageGroup: c.ageGroup ?? "adult", isPlusOne: c.isPlusOne ?? false, diet: [], rsvp: invitesFor(st, c.invitedTo) }] };
+    }
+    case "update_guest": {
+      if (role === "guest") throw new PlanError("Only the organiser can edit guests");
+      const g = st.guests.find(x => x.id === c.guestId);
+      if (!g) throw new PlanError(`No guest ${c.guestId}`);
+      if (c.name === undefined && c.ageGroup === undefined && c.householdId === undefined && c.invitedTo === undefined) throw new PlanError("Nothing to change");
+      if (c.householdId !== undefined && !st.households.some(h => h.id === c.householdId)) throw new PlanError(`No household ${c.householdId}`);
+      let rsvp = g.rsvp;
+      if (c.invitedTo !== undefined) {
+        const want = invitesFor(st, c.invitedTo);
+        rsvp = Object.fromEntries(Object.keys(want).map(sid => [sid, g.rsvp[sid] ?? "invited"]));
+      }
+      const next = { ...g, name: c.name?.trim() ?? g.name, ageGroup: c.ageGroup ?? g.ageGroup, householdId: c.householdId ?? g.householdId, rsvp };
+      const what = [next.name !== g.name && "name", next.ageGroup !== g.ageGroup && "age group", next.householdId !== g.householdId && "household", JSON.stringify(next.rsvp) !== JSON.stringify(g.rsvp) && "invitations"].filter(Boolean);
+      log.push(what.length ? `${next.name}: updated ${what.join(", ")}` : `${g.name} unchanged`);
+      return { ...st, guests: st.guests.map(x => x.id === g.id ? next : x) };
+    }
+    case "remove_guest": {
+      if (role === "guest") throw new PlanError("Only the organiser can remove guests");
+      const g = st.guests.find(x => x.id === c.guestId);
+      if (!g) throw new PlanError(`No guest ${c.guestId}`);
+      log.push(`Removed ${g.name} from the guest list`);
+      return releaseClaims({ ...st, guests: st.guests.filter(x => x.id !== g.id) }, new Set([g.id]));
+    }
+    case "import_guests": {
+      if (role === "guest") throw new PlanError("Only the organiser can import guests");
+      const r = planImport(st, c.entries);
+      if (!r.households.length && !r.guests.length) {
+        const why = [r.duplicates && `${r.duplicates} already on the list`, r.invalid && `${r.invalid} with a phone that isn't a number`].filter(Boolean).join(", ");
+        throw new PlanError(`Nothing new to import${why ? `: ${why}` : ""}`);
+      }
+      assertRoom(st, r.households.length, r.guests.length);
+      log.push(`Imported ${r.guests.length} guest${r.guests.length === 1 ? "" : "s"} in ${r.households.length} new household${r.households.length === 1 ? "" : "s"}`);
+      if (r.duplicates) log.push(`Skipped ${r.duplicates} duplicate${r.duplicates === 1 ? "" : "s"} (same phone or email already on the list)`);
+      if (r.invalid) log.push(`Skipped ${r.invalid} with a phone that isn't a number`);
+      return { ...st, households: [...st.households, ...r.households], guests: [...st.guests, ...r.guests] };
+    }
+    case "request_join": {
+      if (ctx.source !== "join") throw new PlanError("Join requests come only through the group join link");
+      const phone = c.phone ? normalizePhone(c.phone) : null;
+      if (phone && !phone.ok) throw new PlanError(`That phone number doesn't look right (${phone.reason})`);
+      const e164 = phone?.ok ? phone.e164 : "";
+      const pending = st.joinRequests.filter(r => r.status === "pending");
+      // The same person asking twice is one request (same answer either way, so the link can't be used to probe the list).
+      if (pending.some(r => (e164 && r.phone === e164) || (!e164 && !r.phone && sameText(r.name, c.name)))) { log.push("Join request already pending"); return st; }
+      if (pending.length >= GUEST_LIMITS.maxPendingJoins) throw new PlanError("The organizer has too many requests waiting right now. Please ask them directly.");
+      if (st.joinRequests.some(r => r.id === c.requestId)) throw new PlanError("Duplicate request id");
+      log.push(`Join request from ${c.name.trim()} (${c.size})`);
+      return { ...st, joinRequests: capJoinRecords([...st.joinRequests, { id: c.requestId, name: c.name.trim(), size: c.size, phone: e164, at: c.at, status: "pending", householdId: null }]) };
+    }
+    case "approve_join_request": {
+      if (role === "guest") throw new PlanError("Only the organiser can approve join requests");
+      const r = st.joinRequests.find(x => x.id === c.requestId);
+      if (!r) throw new PlanError(`No join request ${c.requestId}`);
+      if (r.status !== "pending") throw new PlanError(`${r.name}'s request was already ${r.status}`);
+      const clash = phoneClash(st, r.phone, null);
+      if (clash) throw new PlanError(`${r.name}'s number is already on the list (${clash.label}): reject this request or remove that household first`);
+      assertRoom(st, 1, r.size);
+      const label = uniqueLabel(st, r.size > 1 ? `${r.name} household` : r.name);
+      const hid = uniqueId(`hh-${slug(label).slice(0, 32)}`, x => st.households.some(h => h.id === x));
+      const rsvp = invitesFor(st, undefined);
+      const taken = new Set(st.guests.map(g => g.id));
+      const guests = Array.from({ length: r.size }, (_, i) => {
+        const name = i === 0 ? r.name : `${r.name} guest ${i + 1}`;
+        const gid = uniqueId(`g-${slug(name).slice(0, 32)}`, x => taken.has(x)); taken.add(gid);
+        return { id: gid, householdId: hid, name, ageGroup: "adult" as const, isPlusOne: i > 0, diet: [], rsvp: { ...rsvp } };
+      });
+      log.push(`Approved ${r.name}: household "${label}" with ${r.size} guest${r.size === 1 ? "" : "s"} (their private link appears after the next sync)`);
+      return { ...st, households: [...st.households, { id: hid, label, side: c.side?.trim() ?? "", inviteCode: "", phone: r.phone, email: "" }],
+        guests: [...st.guests, ...guests],
+        joinRequests: st.joinRequests.map(x => x.id === r.id ? { ...x, status: "approved" as const, householdId: hid, phone: "" } : x) };
+    }
+    case "reject_join_request": {
+      if (role === "guest") throw new PlanError("Only the organiser can decline join requests");
+      const r = st.joinRequests.find(x => x.id === c.requestId);
+      if (!r) throw new PlanError(`No join request ${c.requestId}`);
+      if (r.status !== "pending") throw new PlanError(`${r.name}'s request was already ${r.status}`);
+      log.push(`Declined ${r.name}'s join request`);
+      return { ...st, joinRequests: st.joinRequests.map(x => x.id === r.id ? { ...x, status: "rejected" as const, phone: "" } : x) };
+    }
+    // ---------- v8 Part 1: wishlist / registry ----------
+    case "add_wishlist_item": {
+      if (role === "guest") throw new PlanError("Only the organiser can add gifts");
+      const x = wishExt(st);
+      const item = c.item.trim();
+      if (x.wishlist.some(w => sameText(w.item, item))) throw new PlanError(`"${item}" is already on the ${x.type === "wedding" ? "registry" : "wishlist"}`);
+      if (x.wishlist.length >= GUEST_LIMITS.maxWishlist) throw new PlanError(`Keep the list to ${GUEST_LIMITS.maxWishlist} gifts`);
+      const id = uniqueId(`wl-${slug(item).slice(0, 32)}`, k => x.wishlist.some(w => w.id === k));
+      const w: WishlistItem = { id, item, claimedByGuestId: null, priority: c.priority ?? "med",
+        ...(c.url ? { url: c.url } : {}), ...(c.approxRupees !== undefined ? { approxPaise: c.approxRupees * 100 } : {}) };
+      log.push(`Added "${item}" to the ${x.type === "wedding" ? "gift registry" : "wishlist"}${c.approxRupees !== undefined ? ` (about ${rupees(c.approxRupees * 100)})` : ""}`);
+      return withWishlist(st, x, [...x.wishlist, w]);
+    }
+    case "update_wishlist_item": {
+      if (role === "guest") throw new PlanError("Only the organiser can edit gifts");
+      const x = wishExt(st);
+      const w = x.wishlist.find(i => i.id === c.itemId);
+      if (!w) throw new PlanError(`No wishlist item ${c.itemId}`);
+      const item = c.item?.trim() ?? w.item;
+      if (c.item !== undefined && x.wishlist.some(i => i.id !== w.id && sameText(i.item, item))) throw new PlanError(`"${item}" is already on the list`);
+      const next: WishlistItem = { ...w, item, priority: c.priority ?? w.priority };
+      if (c.url !== undefined) { if (c.url) next.url = c.url; else delete next.url; }
+      if (c.approxRupees !== undefined) { if (c.approxRupees === null) delete next.approxPaise; else next.approxPaise = c.approxRupees * 100; }
+      log.push(`Gift "${item}" updated`);
+      return withWishlist(st, x, x.wishlist.map(i => i.id === w.id ? next : i));
+    }
+    case "remove_wishlist_item": {
+      if (role === "guest") throw new PlanError("Only the organiser can remove gifts");
+      const x = wishExt(st);
+      const w = x.wishlist.find(i => i.id === c.itemId);
+      if (!w) throw new PlanError(`No wishlist item ${c.itemId}`);
+      log.push(`Removed "${w.item}"${w.claimedByGuestId ? " (it was claimed)" : ""}`);
+      return withWishlist(st, x, x.wishlist.filter(i => i.id !== w.id));
+    }
+    case "set_wishlist_surprise": {
+      if (role === "guest") throw new PlanError("Only the organiser can change surprise mode");
+      const x = wishExt(st);
+      if (x.wishlistSurprise === c.on) { log.push(`Surprise mode is already ${c.on ? "on" : "off"}`); return st; }
+      log.push(c.on ? "Surprise mode on: the public link hides claims and this view hides who claimed" : "Surprise mode off");
+      return withWishlist(st, x, x.wishlist, { wishlistSurprise: c.on });
+    }
+    case "unclaim_wishlist_item": {
+      const x = wishExt(st);
+      const w = x.wishlist.find(i => i.id === c.itemId);
+      if (!w) throw new PlanError(`No wishlist item ${c.itemId}`);
+      if (!st.guests.some(g => g.id === c.guestId)) throw new PlanError(`No guest ${c.guestId}`);
+      if (w.claimedByGuestId === null) { log.push(`"${w.item}" is not claimed`); return st; }
+      if (w.claimedByGuestId !== c.guestId) throw new PlanError("You can only release a gift you claimed");
+      log.push(`Wishlist "${w.item}": released`);
+      return withWishlist(st, x, x.wishlist.map(i => i.id === w.id ? { ...i, claimedByGuestId: null } : i));
+    }
     case "set_guest_diet": {
       const g = st.guests.find(x => x.id === c.guestId);
       if (!g) throw new PlanError(`No guest ${c.guestId}`);
       const diet = [...new Set(c.diet.map(d => d.trim().toLowerCase()).filter(Boolean))];
       log.push(`${g.name}: diet ${diet.join(", ") || "no restriction"}`);
-      return { ...st, guests: st.guests.map(x => x.id === g.id ? { ...x, diet } : x) };
+      const next = { ...st, guests: st.guests.map(x => x.id === g.id ? { ...x, diet } : x) };
+      return logChange(next, ctx, role, g, "diet", null, g.diet.join(", ") || "none", diet.join(", ") || "none");
+    }
+    // ---------- v8 Part 1c: the open RSVP list ----------
+    case "submit_rsvp_entry": {
+      if (c.duplicateOf !== undefined && ctx.source !== "rsvp_link") throw new PlanError("Only the RSVP server flags possible duplicates");
+      // Closed is checked against `now`: the server and the app pass it, so a guest write after the close date is refused.
+      if (role === "guest" && ctx.now && rsvpClosed(st.rsvpSettings, ctx.now)) throw new PlanError(RSVP_CLOSED_MESSAGE);
+      const prev = st.rsvpEntries.find(e => e.id === c.entryId);
+      if (prev?.mergedInto) throw new PlanError("This RSVP was merged into another one by the organizer");
+      if (prev?.removedAt) throw new PlanError(RSVP_REMOVED_MESSAGE);
+      if (prev && role === "guest" && !ctx.actorEntryId) throw new PlanError("You can only change your own RSVP");
+      const open = new Set(rsvpFunctions(st).map(x => x.id));
+      const functions: string[] = [];
+      for (const ref of c.functions) {
+        const sub = findSubEvent(st, ref);
+        if (!open.has(sub.id)) throw new PlanError(`${sub.name} doesn't take RSVPs`);
+        if (!functions.includes(sub.id)) functions.push(sub.id);
+      }
+      if (c.answer !== "not_coming" && open.size > 0 && functions.length === 0) throw new PlanError("Pick at least one function you're attending");
+      let kids = prev?.kids ?? null;
+      if (st.rsvpSettings.askKids && c.kids !== undefined) {
+        if (c.kids > c.partySize) throw new PlanError("Kids can't be more than the party size");
+        kids = c.kids;
+      }
+      let phone = prev?.phone ?? "";
+      if (c.phone !== undefined && c.phone !== "") {
+        const r = normalizePhone(c.phone);
+        if (!r.ok) throw new PlanError(`That phone number doesn't look right (${r.reason})`);
+        phone = r.e164;
+      }
+      const live = (id: string | null | undefined) => !!id && id !== c.entryId && st.rsvpEntries.some(e => e.id === id && !e.removedAt && !e.mergedInto);
+      const dup = c.duplicateOf !== undefined ? (live(c.duplicateOf) ? c.duplicateOf! : null) : prev?.possibleDuplicateOf ?? null;
+      const name = c.name.trim();
+      const now = ctx.now ?? prev?.updatedAt ?? "";
+      if (!prev && st.rsvpEntries.length >= RSVP_ENTRIES_CAP) throw new PlanError(`This RSVP list is full (${RSVP_ENTRIES_CAP} RSVPs). Please contact the organizer.`);
+      const entry: RsvpEntry = { ...(prev ?? { vip: false, removedAt: null, mergedInto: null, createdAt: now }), id: c.entryId, name, phone,
+        partySize: c.partySize, kids, functions, meal: c.meal, answer: c.answer, possibleDuplicateOf: dup, updatedAt: now };
+      const fnNames = functions.map(f => st.subEvents.find(x => x.id === f)!.name).join(", ");
+      log.push(`${prev ? "RSVP updated" : "New RSVP"}: ${name}, ${c.partySize} ${c.partySize === 1 ? "person" : "people"}, ${ANSWER_LABEL[c.answer]}${fnNames ? ` (${fnNames})` : ""}, ${MEAL_LABEL[c.meal]}${dup ? " - possible duplicate" : ""}`);
+      return { ...st, rsvpEntries: prev ? st.rsvpEntries.map(e => e.id === prev.id ? entry : e) : [...st.rsvpEntries, entry] };
+    }
+    case "set_rsvp_vip": {
+      if (role === "guest") throw new PlanError("Only the organiser can mark VIPs");
+      const e = rsvpEntryOf(st, c.entryId);
+      if (e.vip === c.vip) { log.push(`${e.name} is already ${c.vip ? "a VIP" : "not a VIP"}`); return st; }
+      log.push(`${e.name}: ${c.vip ? "marked VIP" : "no longer VIP"}`);
+      return { ...st, rsvpEntries: st.rsvpEntries.map(x => x.id === e.id ? { ...x, vip: c.vip } : x) };
+    }
+    case "remove_rsvp_entry": {
+      if (role === "guest") throw new PlanError("Only the organiser can remove RSVPs");
+      const e = rsvpEntryOf(st, c.entryId);
+      log.push(`Removed RSVP: ${e.name} (${e.partySize})${e.phone ? ` ${maskPhoneShort(e.phone)}` : ""}. Undo, or restore it from Recently removed.`);
+      // Its gift claims are released (a spam entry can't hold gifts); Undo brings them back with the entry.
+      return releaseClaims({ ...st, rsvpEntries: st.rsvpEntries.map(x => x.id === e.id ? { ...x, removedAt: ctx.now ?? "removed" }
+        : x.possibleDuplicateOf === e.id ? { ...x, possibleDuplicateOf: null } : x) }, new Set([e.id]));
+    }
+    case "restore_rsvp_entry": {
+      if (role === "guest") throw new PlanError("Only the organiser can restore RSVPs");
+      const e = st.rsvpEntries.find(x => x.id === c.entryId);
+      if (!e) throw new PlanError(`No RSVP ${c.entryId}`);
+      if (e.mergedInto) throw new PlanError(`${e.name}'s RSVP was merged into another one`);
+      if (!e.removedAt) { log.push(`${e.name}'s RSVP isn't removed`); return st; }
+      log.push(`Restored RSVP: ${e.name} (${e.partySize})`);
+      return { ...st, rsvpEntries: st.rsvpEntries.map(x => x.id === e.id ? { ...x, removedAt: null } : x) };
+    }
+    case "merge_rsvp_entries": {
+      if (role === "guest") throw new PlanError("Only the organiser can merge RSVPs");
+      if (c.keepId === c.dropId) throw new PlanError("Pick two different RSVPs to merge");
+      const keep = rsvpEntryOf(st, c.keepId), drop = rsvpEntryOf(st, c.dropId);
+      log.push(`Merged RSVPs: kept ${keep.name} (${keep.partySize}, ${ANSWER_LABEL[keep.answer]}); ${drop.name} (${drop.partySize}) folded into it`);
+      const next = { ...st, rsvpEntries: st.rsvpEntries.map(x => x.id === keep.id ? { ...x, possibleDuplicateOf: null }
+        : x.id === drop.id ? { ...x, mergedInto: keep.id, removedAt: ctx.now ?? "merged", possibleDuplicateOf: null }
+        : x.possibleDuplicateOf === drop.id ? { ...x, possibleDuplicateOf: keep.id } : x) };
+      // A gift the dropped entry claimed now belongs to the kept one (same family).
+      const x = next.event.ext;
+      if ((x.type === "birthday" || x.type === "wedding") && x.wishlist.some(w => w.claimedByGuestId === drop.id))
+        return withWishlist(next, x, x.wishlist.map(w => w.claimedByGuestId === drop.id ? { ...w, claimedByGuestId: keep.id } : w));
+      return next;
+    }
+    case "set_rsvp_settings": {
+      if (role === "guest") throw new PlanError("Only the organiser can change RSVP settings");
+      const cur = st.rsvpSettings;
+      let closesAt = cur.closesAt;
+      if (c.closesOn === null) closesAt = null;
+      else if (c.closesOn !== undefined) {
+        const iso = istToUtcIso(c.closesOn, c.closesTime ?? "23:59");
+        if (!iso) throw new PlanError(`${c.closesOn} isn't a real date`);
+        closesAt = iso;
+      } else if (c.closesTime !== undefined) throw new PlanError("Give the close date with the time");
+      const askKids = c.askKids ?? cur.askKids;
+      if (closesAt !== cur.closesAt) log.push(closesAt ? `RSVPs close ${formatIst(closesAt)}` : "RSVPs stay open (no close date)");
+      if (askKids !== cur.askKids) log.push(askKids ? "The RSVP form now asks how many kids" : "The RSVP form no longer asks about kids");
+      if (closesAt === cur.closesAt && askKids === cur.askKids) { log.push("RSVP settings unchanged"); return st; }
+      return { ...st, rsvpSettings: { ...cur, closesAt, askKids } };
     }
     case "community_signup": {
       const ext = st.event.ext;
@@ -1034,7 +1690,14 @@ function buildRejection(state: AgentState, prefix: AgentState, commands: Command
   return { ok: false, state, error: reason, reason, failedCommandIndex: idx, diagnostics, ...(suggestion ? { suggestion } : {}) };
 }
 
-function runBatch(state: AgentState, input: unknown, withSuggestion: boolean, role: Role = "organizer", source: BatchSource = "agent"): BatchResult {
+/**
+ * v8 Part 1c: the RSVP entry a guest-allowed command acts for (null: it names nobody, like a community sign-up). A claim
+ * with guestId null is a release: it acts for whoever holds the claim, which runBatch checks is the actor.
+ */
+export const targetEntryOf = (c: Command): string | null =>
+  c.op === "submit_rsvp_entry" ? c.entryId : c.op === "claim_wishlist_item" ? c.guestId : null;
+
+function runBatch(state: AgentState, input: unknown, withSuggestion: boolean, role: Role = "organizer", source: BatchSource = "agent", now?: string, actorEntryId?: string | null): BatchResult {
   const parsed = Batch.safeParse(input);
   if (!parsed.success) {
     const reason = parsed.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("; ");
@@ -1052,6 +1715,34 @@ function runBatch(state: AgentState, input: unknown, withSuggestion: boolean, ro
       return { ok: false, state, error: reason, reason, failedCommandIndex: bad,
         diagnostics: { categoryMaxCuttablePaise: {}, knownSubEvents: state.subEvents.map(s => s.slug), violations: ["role:guest"] } };
     }
+    // v8 Part 1c: a guest acts for their own RSVP entry only: they answer it, and claim or release gifts for it. Without an
+    // actor (the guest Co-Pilot before any RSVP) they may only start a new entry; the reducer refuses editing an existing one.
+    const x = state.event.ext;
+    const holder = (itemId: string) => (x.type === "birthday" || x.type === "wedding") ? x.wishlist.find(w => w.id === itemId)?.claimedByGuestId ?? null : null;
+    const out = commands.findIndex(c => {
+      if (c.op === "community_signup" || c.op === "request_join") return false;
+      if (c.op === "claim_wishlist_item") return !actorEntryId || (c.guestId === null ? holder(c.itemId) !== null && holder(c.itemId) !== actorEntryId : c.guestId !== actorEntryId);
+      const t = targetEntryOf(c);
+      return actorEntryId ? t !== actorEntryId : false;
+    });
+    if (out >= 0) {
+      const reason = actorEntryId ? "You can only change your own RSVP and your own gift claims." : "Send your RSVP first, then you can claim a gift.";
+      return { ok: false, state, error: reason, reason, failedCommandIndex: out,
+        diagnostics: { categoryMaxCuttablePaise: {}, knownSubEvents: state.subEvents.map(s => s.slug), violations: ["scope:guest"] } };
+    }
+  }
+  // v8 Part 1: the join endpoint runs request_join and nothing else; nothing else runs request_join.
+  const joinBad = commands.findIndex(c => (source === "join") !== JOIN_ONLY_OPS.has(c.op));
+  if (joinBad >= 0) {
+    const reason = source === "join" ? `"${commands[joinBad]!.op}" can't run from the join link` : "Join requests come only through the group join link";
+    return { ok: false, state, error: reason, reason, failedCommandIndex: joinBad,
+      diagnostics: { categoryMaxCuttablePaise: {}, knownSubEvents: state.subEvents.map(s => s.slug), violations: ["source:join"] } };
+  }
+  const del = commands.findIndex(c => c.op === "delete_event");
+  if (del >= 0 && commands.length > 1) {
+    const reason = "Deleting the event can't be combined with other changes: propose it on its own.";
+    return { ok: false, state, error: reason, reason, failedCommandIndex: del,
+      diagnostics: { categoryMaxCuttablePaise: categoryMaxCuttable(state), knownSubEvents: state.subEvents.map(s => s.slug), violations: ["delete_event:alone"] } };
   }
   if (source !== "ui") {
     const direct = commands.findIndex(c => DIRECT_EDIT_OPS.has(c.op));
@@ -1067,7 +1758,7 @@ function runBatch(state: AgentState, input: unknown, withSuggestion: boolean, ro
   const errsAfter: string[][] = [];
   let next = state;
   for (let i = 0; i < commands.length; i++) {
-    try { next = apply(next, commands[i]!, log, role); }
+    try { next = apply(next, commands[i]!, log, role, { source, now, actorEntryId: role === "guest" ? actorEntryId ?? null : null }); }
     catch (e) {
       if (e instanceof PlanError) return buildRejection(state, next, commands, i, e.message, [], withSuggestion, summary, source);
       throw e;
@@ -1092,8 +1783,8 @@ function runBatch(state: AgentState, input: unknown, withSuggestion: boolean, ro
  * a structured rejection (reason, failing command index, diagnostics, and a verified counter-offer when one exists).
  * It's pure, so calling it is also the dry-run preview.
  */
-export function applyBatch(state: AgentState, input: unknown, opts: { role?: Role; source?: BatchSource } = {}): BatchResult {
-  return runBatch(state, input, opts.role !== "guest", opts.role ?? "organizer", opts.source ?? "agent");
+export function applyBatch(state: AgentState, input: unknown, opts: { role?: Role; source?: BatchSource; now?: string; actorEntryId?: string | null } = {}): BatchResult {
+  return runBatch(state, input, opts.role !== "guest", opts.role ?? "organizer", opts.source ?? "agent", opts.now, opts.actorEntryId);
 }
 /** Spec alias: the same pure reducer. */
 export const applyPlanChanges = applyBatch;

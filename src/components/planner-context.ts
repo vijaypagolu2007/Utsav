@@ -10,6 +10,7 @@ import type { Commit, CreatePlanResult, Highlight, IdeasResult, QuestionsResult,
 import type { Refine } from "@/ideas";
 import type { IdeaKind } from "@/schema";
 import type { SetupInputRaw } from "@/setup";
+import type { ShareInfo, ShareStatus } from "./useSharedEvent";
 
 export type PlannerState = {
   plan: AgentState;
@@ -38,6 +39,23 @@ export type PlannerState = {
   /** Which brain answered last (null until the first AI call). */
   aiMode: "gemini" | "offline" | null;
   forceOffline: boolean;
+  /**
+   * The Overview's event-name row. v8 Part 0d: "Delete event" for every event (requestDelete opens the confirm dialog);
+   * isSample adds "Reset sample" (the existing Reset) next to it. noEvents: every event is deleted, so the setup form
+   * offers restoreSamples ("Restore samples") as well as a new event.
+   */
+  eventActions: { isSample: boolean; requestDelete: () => void; resetSample: () => void; noEvents: boolean; restoreSamples: () => void };
+  /**
+   * v8 Part 1: the shared guest links, for the Guests page. share is null until the organizer publishes. resetInvite and
+   * setJoinLink resolve to an error message, or null when the server did it.
+   */
+  sharing: {
+    share: ShareInfo | null; status: ShareStatus; publish: () => void; syncNow: () => void; openShare: () => void;
+    resetInvite: (householdId: string) => Promise<string | null>;
+    setJoinLink: (action: "enable" | "rotate" | "disable") => Promise<string | null>;
+    /** v8 Part 1c: a new RSVP link for the event (the old one and its QR stop working; RSVPs already sent stay). */
+    resetRsvpLink: () => Promise<string | null>;
+  };
 };
 
 export const PlannerContext = createContext<PlannerState | null>(null);

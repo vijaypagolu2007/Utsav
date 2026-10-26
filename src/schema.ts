@@ -24,22 +24,34 @@ export const SponsorStatus = z.enum(["prospect", "pitched", "committed", "paid",
 export const PermitStatus = z.enum(["not_started", "applied", "approved", "rejected"]);
 
 // ---------- Event, with one extension block per event type ----------
+/**
+ * One gift on a birthday wishlist or a wedding registry (v8 Part 1: the same shape for both). `url` is a shopping link
+ * the organiser typed: https only (checked by isSafeWishlistUrl in commands.ts when it is added or edited), rendered as a
+ * plain link and never fetched by the server. Older plans may hold any URL; the guest projection re-checks it.
+ */
+export const WishlistItem = z.looseObject({
+  id: Id, item: z.string(), url: z.string().url().optional(),
+  approxPaise: Money.optional(), claimedByGuestId: Id.nullable().default(null),
+  priority: Priority.default("med"),
+});
 const WeddingExt = z.looseObject({
   type: z.literal("wedding"),
   partners: z.tuple([z.string(), z.string()]).default(["", ""]),
   traditions: z.array(z.string()).default([]), // e.g. ["telugu", "hindu"]
   rsvpDeadline: IsoDate.nullable().default(null),
+  /** v8 Part 1: the gift registry. Default [] so weddings saved before it still parse. */
+  wishlist: z.array(WishlistItem).max(100).default([]),
+  /** v8 Part 1: surprise mode. The public link hides which gifts are claimed and the organiser view hides who claimed. */
+  wishlistSurprise: z.boolean().default(false),
 });
 const BirthdayExt = z.looseObject({
   type: z.literal("birthday"),
   honoree: z.string().default(""),
   turningAge: z.number().int().nullable().default(null),
   theme: z.string().default(""),
-  wishlist: z.array(z.looseObject({
-    id: Id, item: z.string(), url: z.string().url().optional(),
-    approxPaise: Money.optional(), claimedByGuestId: Id.nullable().default(null),
-    priority: Priority.default("med"),
-  })).default([]),
+  wishlist: z.array(WishlistItem).max(100).default([]),
+  /** v8 Part 1: surprise mode (see WeddingExt). */
+  wishlistSurprise: z.boolean().default(false),
   activities: z.array(z.looseObject({
     id: Id, name: z.string(), ageRange: z.tuple([z.number(), z.number()]).optional(),
     durationMin: z.number().int().positive(), supplies: z.array(z.string()).default([]),
@@ -181,7 +193,10 @@ export const Household = z.looseObject({
   id: Id, label: z.string(),         // "Rao family"
   side: z.string().default(""),      // "bride", "groom", "friends", "school"
   inviteCode: z.string().default(""),
+  /** Organizer-only (v8 Part 1: E.164 when entered through the guest ops). Never in the guest projection, the public page or logs. */
   phone: z.string().default(""),
+  /** Organizer-only, from a vCard or contact import. Same privacy rule as phone. */
+  email: z.string().max(254).default(""),
 });
 
 export const Guest = z.looseObject({
@@ -191,6 +206,87 @@ export const Guest = z.looseObject({
   diet: z.array(z.string()).default([]),   // "veg", "jain", "no-onion-garlic"
   /** Each guest's RSVP is per sub-event. A missing key means not invited to it. */
   rsvp: z.record(Id, RsvpStatus).default({}),
+});
+
+// ---------- v8 Part 1: group join requests and the RSVP change log (organizer only; never in the guest projection) ----------
+/** Someone who opened the organizer's group join link and asked to be added. Approving creates a household. */
+export const JoinRequest = z.looseObject({
+  id: Id,
+  name: z.string().min(1).max(80),
+  /** People in their household, the requester included. */
+  size: z.number().int().min(1).max(20),
+  /** E.164, or "" when not given. Cleared once the request is decided (it moves to the household on approval). */
+  phone: z.string().default(""),
+  /** ISO time the server received it. */
+  at: z.string().default(""),
+  status: z.enum(["pending", "approved", "rejected"]).default("pending"),
+  householdId: Id.nullable().default(null),
+});
+export const ChangeSource = z.enum(["organizer", "copilot", "guest_link", "guest_preview"]);
+/** One RSVP or meal-preference change: who changed what, when, and through which door. */
+export const RsvpLogEntry = z.looseObject({
+  id: Id,
+  at: z.string(),
+  householdId: z.string(),
+  householdLabel: z.string().default(""),
+  guestId: z.string(),
+  guestName: z.string().default(""),
+  field: z.enum(["rsvp", "diet"]),
+  /** For an RSVP: the sub-event it was for. */
+  subEventId: z.string().nullable().default(null),
+  before: z.string().max(200),
+  after: z.string().max(200),
+  source: ChangeSource,
+});
+/** The change log keeps the newest entries only. */
+export const RSVP_LOG_CAP = 300;
+export const JOIN_RECORDS_CAP = 200;
+
+// ---------- v8 Part 1c: the open RSVP list (one link for everyone; no guest list needed) ----------
+/** One meal choice per RSVP (the whole party). Persisted values: never rename one. */
+export const RsvpMeal = z.enum(["veg", "non_veg", "jain"]);
+/** A guest's own answer on the open RSVP form. */
+export const RsvpAnswer = z.enum(["coming", "maybe", "not_coming"]);
+/** Largest party one RSVP can carry (the guest form's 1 to 20). */
+export const RSVP_MAX_PARTY = 20;
+/**
+ * Most RSVPs one event keeps, removed ones included. 1,000 RSVPs is 3,000+ people at the usual 3 to 4 per family. The
+ * real bound is bytes: the whole plan (entries included) must stay under the 400 KiB limit shared with cloud save, whose
+ * Firestore rule can't be raised without a rules change, so the server also refuses a write that would cross it.
+ */
+export const RSVP_ENTRIES_CAP = 1000;
+export const RSVP_NAME_MAX = 80;
+/**
+ * One RSVP from the open link. Guest-owned: name, phone, partySize, kids, functions, meal, answer, updatedAt. Organizer-owned:
+ * vip, removedAt, mergedInto. possibleDuplicateOf is set by the server (same phone hash from another device) and cleared
+ * by the organizer (merge, or "not a duplicate"). The phone is organizer-only, like a household phone: never in the guest
+ * projection, the public API, the AI prompt, logs or approval cards (masked there).
+ */
+export const RsvpEntry = z.looseObject({
+  id: z.string().regex(/^r-[A-Za-z0-9_-]{4,40}$/),
+  name: z.string().min(1).max(RSVP_NAME_MAX),
+  /** E.164 or "". */
+  phone: z.string().max(16).default(""),
+  partySize: z.number().int().min(1).max(RSVP_MAX_PARTY).default(1),
+  /** How many of the party are children; null when the organizer doesn't ask. */
+  kids: z.number().int().min(0).max(RSVP_MAX_PARTY).nullable().default(null),
+  /** Sub-event ids this party is attending. */
+  functions: z.array(Id).max(30).default([]),
+  meal: RsvpMeal.default("veg"),
+  answer: RsvpAnswer.default("coming"),
+  vip: z.boolean().default(false),
+  possibleDuplicateOf: z.string().nullable().default(null),
+  /** Soft delete: the row moves to "Recently removed" and can be restored. Its device can't write any more. */
+  removedAt: z.string().nullable().default(null),
+  /** Set when the organizer merged this entry into another one; its device then edits that one. */
+  mergedInto: z.string().nullable().default(null),
+  createdAt: z.string().default(""),
+  updatedAt: z.string().default(""),
+});
+/** Organizer settings for the open RSVP form. closesAt is a UTC instant (the organizer picks it in IST). */
+export const RsvpSettings = z.looseObject({
+  closesAt: z.string().nullable().default(null),
+  askKids: z.boolean().default(false),
 });
 
 // ---------- Ideas: personalised suggestions (theme, decor, menu, ...) the organiser can save, dismiss or adopt ----------
@@ -248,6 +344,12 @@ export const AgentState = z.looseObject({
   /** v6: organiser-only. Defaults so plans saved before v6 still parse. Never in the guest projection. */
   priorities: Priorities.default({ protect: [], cutFirst: [], level: "balanced" }),
   vendorChecklist: VendorChecklistState.default({ notNeeded: [] }),
+  /** v8 Part 1: organizer-only. Defaults so older plans still parse. */
+  joinRequests: z.array(JoinRequest).max(JOIN_RECORDS_CAP).default([]),
+  rsvpLog: z.array(RsvpLogEntry).max(RSVP_LOG_CAP).default([]),
+  /** v8 Part 1c: the open RSVP list and its settings. Defaults so older plans still parse. */
+  rsvpEntries: z.array(RsvpEntry).max(RSVP_ENTRIES_CAP).default([]),
+  rsvpSettings: RsvpSettings.default({ closesAt: null, askKids: false }),
 });
 
 export type AgentState = z.infer<typeof AgentState>;
@@ -262,6 +364,14 @@ export type Household = z.infer<typeof Household>;
 export type Vendor = z.infer<typeof Vendor>;
 export type EventExt = z.infer<typeof EventExt>;
 export type Idea = z.infer<typeof Idea>;
+export type WishlistItem = z.infer<typeof WishlistItem>;
+export type JoinRequest = z.infer<typeof JoinRequest>;
+export type RsvpLogEntry = z.infer<typeof RsvpLogEntry>;
+export type ChangeSource = z.infer<typeof ChangeSource>;
+export type RsvpEntry = z.infer<typeof RsvpEntry>;
+export type RsvpMeal = z.infer<typeof RsvpMeal>;
+export type RsvpAnswer = z.infer<typeof RsvpAnswer>;
+export type RsvpSettings = z.infer<typeof RsvpSettings>;
 export type IdeaKind = z.infer<typeof IdeaKind>;
 export type IdeaStatus = z.infer<typeof IdeaStatus>;
 export type BudgetCategory = BudgetItem["category"];
