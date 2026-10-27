@@ -1,12 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { openPageNav, skipWelcome } from "./helpers";
+import { openPageNav, skipWelcome, ownClientIp } from "./helpers";
 
 // v6: priorities in setup and on /budget, "Fix by my priorities", what-if, the vendor workspace (checklist, questions,
 // quote comparison, booking via approval), task dependencies, idea refinement, the adopt over-budget warning and the
 // stress test ("budget down ₹50k, 2 weeks earlier" revises the plan in one card). The server runs with Gemini disabled.
 const pageErrors: string[] = [];
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, info) => {
+  await ownClientIp(page, info);
   pageErrors.length = 0;
   page.on("pageerror", e => pageErrors.push(e.message));
 });

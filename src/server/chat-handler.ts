@@ -43,6 +43,12 @@ export type ChatDeps = {
   stepTimeoutMs?: number;
   totalTimeoutMs?: number;
   maxSteps?: number;
+  /**
+   * v8 Part 2: the request carries a guest's credentials (an X-Guest-Token or X-Device-Token header, as guest pages
+   * send). Such a request is always answered as a guest, whatever role its body names, and one naming "organizer" is
+   * refused: a guest link must never reach the organizer's tools.
+   */
+  guestCredentials?: boolean;
 };
 
 /** Failures where answering with the deterministic offline brain is safe: the user gets correct, labelled results. */
@@ -70,7 +76,8 @@ export async function handleChat(raw: unknown, deps: ChatDeps): Promise<HandlerR
   const last = [...messages].reverse().find(m => m.role === "user")?.text.trim() ?? "";
   if (!last) return fail(400, "empty_message", "The last user message is empty");
   const today = req.data.today ?? todayIST();
-  const role: Role = req.data.role ?? "organizer";
+  if (deps.guestCredentials && req.data.role === "organizer") return fail(403, "not_allowed", "A guest link can't act as the organiser");
+  const role: Role = deps.guestCredentials ? "guest" : req.data.role ?? "organizer";
   const actingEntryId = req.data.actingEntryId ?? null;
   // v8 Part 1c: Guest View acts as one RSVP entry of this event (or nobody yet).
   if (actingEntryId !== null && !plan.rsvpEntries.some(e => e.id === actingEntryId && !e.removedAt && !e.mergedInto)) return fail(400, "invalid_guest", "actingEntryId is not an RSVP of this event");

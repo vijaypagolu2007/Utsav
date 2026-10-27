@@ -67,9 +67,18 @@ export const bearerToken = (request: Request): string | null => {
   return m ? m[1]! : null;
 };
 
-/** Best-effort client IP for rate limiting (Vercel sets x-forwarded-for / x-real-ip). Never used for auth. */
-export const clientIp = (request: Request) =>
-  (request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "local").slice(0, 64);
+/**
+ * Best-effort client IP for rate limiting. Never used for auth.
+ * Order: x-real-ip (set by the platform's proxy, e.g. Vercel, to the address that proxy saw), then the
+ * RIGHTMOST x-forwarded-for entry, then "local". Each proxy appends the address it received from, so the leftmost
+ * entries are whatever the client chose to send (a bot could rotate them to dodge every per-IP limit); the rightmost
+ * one was written by the closest proxy hop, which the client can't forge.
+ */
+export const clientIp = (request: Request) => {
+  const real = request.headers.get("x-real-ip")?.trim();
+  const hops = (request.headers.get("x-forwarded-for") ?? "").split(",").map(h => h.trim()).filter(Boolean);
+  return (real || hops[hops.length - 1] || "local").slice(0, 64);
+};
 
 // ---------- provider key ----------
 /** The Gemini key, read on the server only. UTSAV_DISABLE_GEMINI=1 forces Demo Mode even when .env.local holds a key

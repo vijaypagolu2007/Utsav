@@ -2,6 +2,7 @@
 // tested, plus the two small per-device flags they read. Nothing here is a secret or an access control: the plan in
 // localStorage is readable by anyone at this browser; the "locked" opening is a courtesy for shared computers, and
 // the cloud copy is protected by the server's ID-token check and firestore.rules.
+import { discardPendingSave } from "./persistence";
 
 export const SIGNIN_PATH = "/signin";
 /** localStorage: someone signed in on this browser before (set on every observed sign-in, cleared by "remove from this device"). */
@@ -127,6 +128,7 @@ export const DEVICE_PLAN_KEYS = ["genai_event_planner_v1", "utsav_onboarding_v1"
   /** v8 Part 0c: Recently deleted (plans and parked guest-link tokens) and the cloud deletions still owed (trash.ts). */ "utsav_trash_v1", "utsav_cloud_pending_v1"] as const;
 /** "Also remove this plan from this device": the next opening is a brand-new browser's. */
 export function forgetThisDevice(): void {
+  discardPendingSave();
   for (const k of DEVICE_PLAN_KEYS) { try { local()?.removeItem(k); } catch { /* storage blocked */ } }
   try { session()?.removeItem(SKIP_SIGNIN_KEY); } catch { /* storage blocked */ }
 }

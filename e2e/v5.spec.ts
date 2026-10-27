@@ -1,11 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { skipWelcome, openPageNav, switchEvent } from "./helpers";
+import { skipWelcome, openPageNav, switchEvent, ownClientIp } from "./helpers";
 
 // v5: first-run welcome and setup (user-chosen budget), add/remove budget lines, total + rebalance, the Ideas page
 // (offline Demo Mode bank), and the removed "haldi" template jump. The server runs with Gemini disabled.
 const pageErrors: string[] = [];
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, info) => {
+  await ownClientIp(page, info);
   pageErrors.length = 0;
   page.on("pageerror", e => pageErrors.push(e.message));
 });

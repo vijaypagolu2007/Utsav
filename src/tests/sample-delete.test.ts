@@ -15,6 +15,7 @@ import type { AgentState } from "../schema";
 import { applyBatch } from "../commands";
 import { commandTier } from "../trust";
 import { runOfflineAgent, runOfflineGuestAgent } from "../offline";
+import { plannerSource } from "./planner-source";
 
 const src = (f: string) => readFileSync(new URL(f, import.meta.url), "utf8");
 const NOW = Date.parse("2026-10-25T16:30:00Z");
@@ -59,7 +60,7 @@ describe("deleting a sample (pure)", () => {
     const [back] = parseTrash(serializeTrash([{ ...r.item, localOnly: true }]));
     assert.equal(back?.localOnly, true);
     assert.equal(parseTrash(serializeTrash([r.item]))[0]?.localOnly, undefined);
-    const app = src("../components/PlannerApp.tsx");
+    const app = plannerSource();
     assert.match(app, /if \(!r\.item\.localOnly\) cloud\.markRestored\(/);
     assert.match(app, /if \(!item\.localOnly\) void cloud\.deleteForever\(/);
     assert.match(app, /if \(!i\.localOnly\) void cloudDeleteForever\(/);
@@ -124,13 +125,13 @@ describe("Restore samples / Load sample events", () => {
   });
   test("hidden samples are part of it: Hide samples only applies while an own event exists, and the app clears it", () => {
     assert.equal(samplesHidden(true, 0), false);
-    const app = src("../components/PlannerApp.tsx");
+    const app = plannerSource();
     assert.match(app, /const bringSamplesBack = \(\): TemplateId\[\] => \{[\s\S]*?if \(hidePref\) \{ setHidePref\(false\); saveHideSamples\(false\); \}/);
     assert.match(app, /const loadSampleEvents = \(\) => \{\s*rememberChoice\("samples"\);[\s\S]*?bringSamplesBack\(\);/);
     assert.match(app, /const samplesMissing = events\.removed\.length > 0 \|\| hideSamples === true;/);
   });
   test("fresh copies of samples that were in the account are saved over their tombstone (markRestored)", () => {
-    const app = src("../components/PlannerApp.tsx");
+    const app = plannerSource();
     assert.match(app, /for \(const slot of r\.restored\) cloud\.markRestored\(slot, historyOf\(r\.store, slot\)\.snaps\[0\]!\.plan\);/);
   });
 });
@@ -154,7 +155,7 @@ describe("storage: the deleted-sample mark", () => {
     const withOwn = { ...s, byType: { wedding: { snaps: [{ plan: own("wedding", "Ours"), label: "x" }], idx: 0 } } };
     assert.equal(sampleRemoved(withOwn, "wedding"), false);
     assert.deepEqual(switcherSections(withOwn).mine.map(e => e.slot), ["wedding"]);
-    assert.match(src("../components/PlannerApp.tsx"), /const setHist = \(h: History, t: TemplateId = storeRef\.current\.active\) => setStore\(unmarkRemoved\(/);
+    assert.match(plannerSource(), /const setHist = \(h: History, t: TemplateId = storeRef\.current\.active\) => setStore\(unmarkRemoved\(/);
   });
   test("a fresh slot history is still the sample (nothing else changes for slots without a mark)", () => {
     assert.equal(planHash(freshHistory("community").snaps[0]!.plan), planHash(instantiateTemplate("community")));
@@ -174,7 +175,7 @@ describe("cloud: samples take the Part 0c tombstone path; untouched local sample
     assert.deepEqual(decideTombstoneSync({ local: sample, localPristine: true, cloud: copy(edited, 4, D), base: null, pending: { kind: "restore", eventId: sample.event.id } }), { kind: "restore", baseVersion: 4 });
   });
   test("the app skips the cloud for an untouched sample that never went to the account, and the hook never syncs a placeholder", () => {
-    const app = src("../components/PlannerApp.tsx");
+    const app = plannerSource();
     assert.match(app, /const localOnly = isPristineSample\(slot, deleted\) && !\(account && \(firstChoice === "samples" \|\| loadSyncBase\(account, slot\)\)\);/);
     assert.match(app, /if \(!localOnly\) cloud\.markDeleted\(slot, deleted\);/);
     assert.match(app, /isRemoved: k => isTemplateId\(k\) && sampleRemoved\(storeRef\.current, k\)/);
@@ -200,7 +201,7 @@ describe("Co-Pilot delete_event on a sample", () => {
     assert.ok(!g.actions.some(a => a.kind === "batch" && a.batch.commands.some(c => c.op === "delete_event")));
   });
   test("approving the card opens the same confirm for samples (no 'use Reset sample' refusal any more)", () => {
-    const app = src("../components/PlannerApp.tsx");
+    const app = plannerSource();
     assert.doesNotMatch(app, /use Reset sample on the Overview instead/);
     assert.match(app, /requestDelete\(storeRef\.current\.active, ok =>/);
   });
@@ -217,7 +218,7 @@ describe("UI (static)", () => {
     const pages = src("../components/PlannerPages.tsx");
     assert.match(pages, /data-testid="no-events"/);
     assert.match(pages, /data-testid="setup-restore-samples"/);
-    const app = src("../components/PlannerApp.tsx");
+    const app = plannerSource();
     assert.match(app, /if \(noEvents && opening === "plan" && !isSetupPath\(pathRef\.current\)\) router\.replace\(SETUP_PATH\)/);
     assert.match(app, /\{!noEvents && <CopilotLauncher/);
   });

@@ -11,6 +11,7 @@ import {
 } from "@/cloud-sync";
 import { decideTombstoneSync, loadPending, mayDeleteForever, savePending } from "@/trash";
 import { TEMPLATES } from "@/config/event-templates";
+import { flushStore } from "@/persistence";
 import { markSignedInOnDevice } from "@/signin";
 import type { CloudPlans } from "@/my-events";
 import { loadAuthState, warnUnavailable, type AuthApi, type CloudUser, type UnavailableReason } from "./cloud-auth";
@@ -198,6 +199,9 @@ export function useCloudSync(planKey: string, plan: AgentState, onUseCloud: (clo
   const check = useCallback(async () => {
     const u = userRef.current, key = keyRef.current, g = ++gen.current;
     if (!u) return;
+    // v8 Part 2 fix: decide from the plan in memory (planRef), with any debounced save written first, so storage and the
+    // sign-in decision (edited sample vs untouched) agree.
+    flushStore();
     cloudOff.current = false;
     // v8 Part 0d: a deleted sample's placeholder: only the deletion this device owes (if any) is sent.
     if (hooksRef.current.isRemoved?.(key)) { void sendPendingDelete(key); setStatus({ state: "sample" }); return; }

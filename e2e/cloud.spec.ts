@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { skipWelcome, switchEvent } from "./helpers";
+import { skipWelcome, switchEvent, ownClientIp } from "./helpers";
 
 // v7: optional Google sign-in + cloud save. Firebase is never configured in E2E, so by default no Firebase code loads
 // and the header's "Sign in" leads to /signin, which says "Sign-in unavailable" (v8: never hidden). The signed-in tests stand in a fake auth module (window.__UTSAV_AUTH_MOCK__, honoured
@@ -9,7 +9,8 @@ import { skipWelcome, switchEvent } from "./helpers";
 
 const TOKEN = "e2e-mock-id-token";
 const pageErrors: string[] = [];
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, info) => {
+  await ownClientIp(page, info);
   pageErrors.length = 0;
   page.on("pageerror", e => pageErrors.push(e.message));
   await skipWelcome(page);
@@ -167,6 +168,8 @@ test("cloud copy differs on sign-in: choose; Use cloud copy loads it and is one 
   const cloud = await fakeCloud(page);
   await page.goto("/");
   await renameEvent(page, "Device plan");
+  // v8 Part 2: plan saves are debounced (300 ms); wait for the rename to reach storage.
+  await expect.poll(async () => (await localPlan(page))?.event?.title ?? null).toBe("Device plan");
   const plan = await localPlan(page);
   expect(plan).not.toBeNull();
   cloud.docs.set("wedding", { version: 3, updatedAt: "2026-10-22T08:30:00.000Z", plan: { ...plan, event: { ...plan.event, title: "From my laptop" } } });

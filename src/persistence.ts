@@ -84,6 +84,9 @@ export const storedTitles = (s: Store): Record<string, string | null> =>
 
 export function loadStore(): Store {
   if (typeof window === "undefined") return defaultStore();
+  // v8 Part 2 fix: a save still waiting for its debounce is the newest plan; write it before reading storage back, so a
+  // planner that remounts within SAVE_DEBOUNCE_MS (a round trip to /signin) starts from the edit, not the copy before it.
+  flushStore();
   try { return parseStore(window.localStorage.getItem(STORAGE_KEY)); } catch { return defaultStore(); }
 }
 
@@ -96,6 +99,7 @@ export const ONBOARDING_KEY = "utsav_onboarding_v1";
  */
 export function isFirstRun(): boolean {
   if (typeof window === "undefined") return false;
+  flushStore(); // a pending save means there is a plan (see loadStore)
   try { return window.localStorage.getItem(STORAGE_KEY) === null && window.localStorage.getItem(ONBOARDING_KEY) !== "done"; } catch { return false; }
 }
 export function markOnboarded(): void {
@@ -104,14 +108,66 @@ export function markOnboarded(): void {
 }
 
 /**
- * Save the store. v8 Part 1: a big guest list (hundreds of imported households plus the change log) times 25 undo steps
- * can pass the browser's ~5 MB localStorage quota, so a failed write retries with a shorter undo history (5, then 1
- * step per event) instead of silently keeping nothing.
+ * Write the store now. v8 Part 1: a big guest list (hundreds of imported households plus the change log) times 25 undo
+ * steps can pass the browser's ~5 MB localStorage quota, so a failed write retries with a shorter undo history (5, then
+ * 1 step per event) instead of silently keeping nothing.
  */
-export function saveStore(s: Store): boolean {
+export function writeStore(s: Store): boolean {
   if (typeof window === "undefined") return false;
   for (const n of [MAX_SNAPSHOTS, 5, 1]) {
     try { window.localStorage.setItem(STORAGE_KEY, serializeStore(s, n)); return true; } catch { /* quota: try a shorter history */ }
   }
   return false;
 }
+
+// ---------- v8 Part 2: debounced saves ----------
+// Every edit used to serialise the whole store (up to 25 undo steps per event) synchronously. Saves are now trailing-
+// debounced: a burst of edits writes once, SAVE_DEBOUNCE_MS after the last one. The pending write is flushed when the
+// page is hidden or unloaded (pagehide, visibilitychange to hidden, beforeunload), so a reload or a closed tab keeps the
+// latest plan, and code that must see storage up to date (switching or deleting an event, a cloud copy landing, sign-out
+// removing this device's plans) calls flushStore() first. Every reader of the stored plans (loadStore, isFirstRun) flushes
+// first too, the planner flushes when it unmounts (client navigation to /signin leaves the (planner) layout), and the
+// links and handlers that go to or come back from sign-in flush before they navigate.
+export const SAVE_DEBOUNCE_MS = 300;
+let pending: Store | null = null;
+let timer: ReturnType<typeof setTimeout> | null = null;
+let listening = false;
+
+function listen() {
+  if (listening || typeof window === "undefined" || typeof window.addEventListener !== "function") return;
+  listening = true;
+  window.addEventListener("pagehide", flushStore);
+  window.addEventListener("beforeunload", flushStore);
+  if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushStore(); });
+  }
+}
+
+/** Save the store, SAVE_DEBOUNCE_MS after the last call (trailing). The newest store always wins. */
+export function saveStore(s: Store): void {
+  if (typeof window === "undefined") return;
+  pending = s;
+  listen();
+  if (timer !== null) clearTimeout(timer);
+  timer = setTimeout(flushStore, SAVE_DEBOUNCE_MS);
+}
+
+/** Write a pending save right away. Returns whether a write happened and succeeded (false when nothing was pending). */
+export function flushStore(): boolean {
+  if (timer !== null) { clearTimeout(timer); timer = null; }
+  const s = pending;
+  pending = null;
+  return s ? writeStore(s) : false;
+}
+
+/**
+ * Drop a pending save without writing it ("Also remove this plan from this device": nothing may land after the plans
+ * are removed).
+ */
+export function discardPendingSave(): void {
+  if (timer !== null) { clearTimeout(timer); timer = null; }
+  pending = null;
+}
+
+/** True while a save is waiting for its debounce (tests and diagnostics). */
+export const hasPendingSave = () => pending !== null;

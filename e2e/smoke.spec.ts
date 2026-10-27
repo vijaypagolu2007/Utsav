@@ -1,9 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
-import { submitRsvp, skipWelcome, openPageNav, switchEvent } from "./helpers";
+import { submitRsvp, skipWelcome, openPageNav, switchEvent, ownClientIp } from "./helpers";
 
 // Every test starts from a clean browser profile (fresh localStorage), so state never leaks between tests.
 const pageErrors: string[] = [];
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, info) => {
+  await ownClientIp(page, info);
   pageErrors.length = 0;
   page.on("pageerror", e => pageErrors.push(e.message));
   await skipWelcome(page);

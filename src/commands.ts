@@ -1,5 +1,5 @@
-// One command language and one pure reducer. Gemini function calls and CopilotKit actions
-// both reach the state only through applyBatch(), so the same command always yields the same state.
+// One command language and one pure reducer. Gemini function calls, the offline Demo Mode brain and the dashboard's own
+// controls all reach the state only through applyBatch(), so the same command always yields the same state.
 import { z } from "zod";
 import { AgentState, BudgetItem, ExperienceLevel, IdeaKind, IsoDate, MinuteOfDay, Money, PermitStatus, Priority, QuoteBasis, RSVP_LOG_CAP, JOIN_RECORDS_CAP, RsvpStatus, SponsorStatus, SponsorTier, TaskStatus, VendorStage, RsvpAnswer, RsvpMeal, RSVP_ENTRIES_CAP, RSVP_MAX_PARTY, RSVP_NAME_MAX, type ChangeSource, type RsvpEntry, type RsvpLogEntry, type WishlistItem } from "./schema";
 import { normalizePhone } from "./phone";

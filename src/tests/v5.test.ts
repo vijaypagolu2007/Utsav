@@ -2,7 +2,6 @@
 // and the removed "haldi" template jump. Gemini is always mocked; no network, no real key.
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 process.env.UTSAV_SILENT_LOGS = "1";
 import { royalWedding, arcadeBirthday, culturalFest } from "../presets";
 import { AgentState, type Idea } from "../schema";
@@ -21,6 +20,7 @@ import type { GenerateFn, GenerateResult } from "../server/gemini-client";
 import { toGuestView } from "../guest-view";
 import { pageForPath, pagesForDiff, PAGES } from "../routes";
 import { parseStore, serializeStore, defaultStore } from "../persistence";
+import { plannerSource } from "./planner-source";
 
 const TODAY = "2026-10-23";
 const run = (st: AgentState, commands: CommandInput[], opts: Parameters<typeof applyBatch>[2] = {}) => applyBatch(st, { summary: "t", commands }, opts);
@@ -511,7 +511,7 @@ describe("ideas over /api/chat (mocked Gemini)", () => {
 // ---------------------------------------------------------------- the haldi regression
 describe("a message never switches templates or resets the plan (regression)", () => {
   test("PlannerApp.send has no template jump or reset on 'haldi'", () => {
-    const src = readFileSync(new URL("../components/PlannerApp.tsx", import.meta.url), "utf8");
+    const src = plannerSource();
     const send = src.slice(src.indexOf("const send = async"), src.indexOf("const scan = async"));
     assert.ok(send.length > 100, "found send()");
     assert.doesNotMatch(send, /haldi/i);

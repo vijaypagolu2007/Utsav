@@ -2,6 +2,7 @@
 // with a mocked Gemini). The body is read with a hard byte cap before any parsing.
 import { handleScan, scanInputFromForm, scanInputFromJson, SCAN_MAX_BODY_BYTES } from "@/server/scan-handler";
 import { geminiGenerate } from "@/server/gemini-client";
+import { aiLimited } from "@/server/ai-limit";
 import { fail, logServer, readBodyLimited, toResponse, geminiApiKey } from "@/server/http";
 
 export const runtime = "nodejs";
@@ -9,6 +10,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function POST(request: Request) {
+  const rl = await aiLimited(request, "aiScan");
+  if (rl) return toResponse(rl);
   const ctype = request.headers.get("content-type") ?? "";
   const body = await readBodyLimited(request, SCAN_MAX_BODY_BYTES);
   if (!body.ok) return toResponse(body.result);
