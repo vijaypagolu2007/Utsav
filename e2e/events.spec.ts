@@ -1,12 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { skipWelcome, switchEvent } from "./helpers";
+import { skipWelcome, switchEvent, ownClientIp } from "./helpers";
 
 // v8 Part 0b: the header's event title is the event menu ("My events" and "Samples", "New event"), replacing the
 // template <select>; the red-flag count is an outlined badge.
 
 const pageErrors: string[] = [];
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, info) => {
+  await ownClientIp(page, info);
   pageErrors.length = 0;
   page.on("pageerror", e => pageErrors.push(e.message));
   await skipWelcome(page);

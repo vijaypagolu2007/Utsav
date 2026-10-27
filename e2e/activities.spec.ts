@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { openPageNav, skipWelcome, switchEvent } from "./helpers";
+import { openPageNav, skipWelcome, switchEvent, ownClientIp } from "./helpers";
 
 // v8 Part 1e: the editable party activity run-sheet on the birthday sample's Event page. Add, edit (name, minutes,
 // ages, supply chips), reorder, the party start time and the computed row times (midnight wrap included), delete with
@@ -8,7 +8,8 @@ import { openPageNav, skipWelcome, switchEvent } from "./helpers";
 // and axe in light and dark at 375 and 1280. Demo Mode build with the file store, like every other spec.
 
 const pageErrors: string[] = [];
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, info) => {
+  await ownClientIp(page, info);
   pageErrors.length = 0;
   page.on("pageerror", e => pageErrors.push(e.message));
   await skipWelcome(page);

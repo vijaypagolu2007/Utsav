@@ -78,12 +78,16 @@ export default function ShareDialog(props: Props) {
 
 function ShareDialogOpen({ onClose, share, status, onPublish, onSync, onForget, plan }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
+  // v8 Part 2: focus starts on the Close button, the safe control (as ConfirmDialog starts on Cancel), whatever the
+  // browser's own dialog focusing picks.
+  const closeRef = useRef<HTMLButtonElement>(null);
   const downOnBackdrop = useRef(false);
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (!d.open) d.showModal();
+    closeRef.current?.focus();
     // React Strict Mode (dev) runs this effect twice: the cleanup's close() queues a "close" event that lands after the
     // second showModal(), so the dialog's onClose ignores a close event that arrives while the dialog is open again.
     return () => { if (d.open) d.close(); if (opener?.isConnected) opener.focus(); };
@@ -98,7 +102,7 @@ function ShareDialogOpen({ onClose, share, status, onPublish, onSync, onForget, 
         <div className="mb-3 flex items-center gap-2">
           <Link2 size={18} aria-hidden="true" className="text-brand-700" />
           <h2 id="share-title" className="text-base font-semibold">Guest links</h2>
-          <button type="button" onClick={onClose} className="ml-auto grid h-11 w-11 place-items-center rounded-lg text-sand-700 hover:bg-sand-100" aria-label="Close" title="Close (Esc)"><X size={18} aria-hidden="true" /></button>
+          <button ref={closeRef} type="button" onClick={onClose} data-testid="share-close" className="ml-auto grid h-11 w-11 place-items-center rounded-lg text-sand-700 hover:bg-sand-100" aria-label="Close" title="Close (Esc)"><X size={18} aria-hidden="true" /></button>
         </div>
         <p className="mb-3 text-sm text-ink-muted" data-testid="share-intro">
           Share this one link with everyone. Each family fills in one short form and sees the schedule, venues and dress codes,

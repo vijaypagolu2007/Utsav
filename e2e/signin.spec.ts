@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { ownClientIp } from "./helpers";
 
 // v8 Part 0: /signin and the sign-in-first opening. Firebase is never configured in E2E (playwright.config.ts blanks
 // the four NEXT_PUBLIC_FIREBASE_* values), so without a stand-in the page shows "Sign-in unavailable" and the
@@ -8,7 +9,8 @@ import AxeBuilder from "@axe-core/playwright";
 // implements the email and password calls; the real Firebase popup and email delivery are not exercised.
 
 const pageErrors: string[] = [];
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, info) => {
+  await ownClientIp(page, info);
   pageErrors.length = 0;
   page.on("pageerror", e => pageErrors.push(e.message));
 });
@@ -247,7 +249,8 @@ test("sign out (mocked) with 'Also remove this plan from this device' clears thi
   await page.getByRole("textbox", { name: "event name", exact: true }).fill("Shared PC wedding");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Shared PC wedding");
-  expect(await page.evaluate(() => localStorage.getItem("genai_event_planner_v1"))).toContain("Shared PC wedding");
+  // v8 Part 2: plan saves are debounced (300 ms), so wait for the write rather than reading at once.
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("genai_event_planner_v1"))).toContain("Shared PC wedding");
   // Let the autosave (1.5 s after the edit) finish first, so no save is in flight while signing out.
   await page.waitForTimeout(2500);
   await expect(page.getByTestId("cloud-account")).toHaveAttribute("data-sync", "saved");

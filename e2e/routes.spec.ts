@@ -1,12 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { expectHighlighted, expectSectionHighlighted, skipWelcome, openPageNav, switchEvent, trackHighlights } from "./helpers";
+import { expectHighlighted, expectSectionHighlighted, skipWelcome, openPageNav, switchEvent, trackHighlights, ownClientIp } from "./helpers";
 
 // Round 3: the organizer dashboard as separate pages (/, /budget, /tasks, /schedule, /event) sharing one client-side
 // plan state in the (planner) layout. Same Demo Mode build and file store as the other specs.
 
 const pageErrors: string[] = [];
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, info) => {
+  await ownClientIp(page, info);
   pageErrors.length = 0;
   page.on("pageerror", e => pageErrors.push(e.message));
   await skipWelcome(page);

@@ -1,12 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { skipWelcome, openPageNav, switchEvent } from "./helpers";
+import { skipWelcome, openPageNav, switchEvent, ownClientIp } from "./helpers";
 
 // Co-Pilot drawer, keyboard/focus, budget meters, responsive layout and an axe-core WCAG 2.2 A/AA scan.
 // Runs against the same Demo Mode build as smoke.spec.ts (no Gemini calls).
 
 const pageErrors: string[] = [];
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, info) => {
+  await ownClientIp(page, info);
   pageErrors.length = 0;
   page.on("pageerror", e => pageErrors.push(e.message));
   await skipWelcome(page);
@@ -226,6 +227,9 @@ test("share dialog is a modal dialog that Escape closes", async ({ page }) => {
   await page.getByTestId("open-guest-links").click();
   const dlg = page.getByRole("dialog", { name: "Guest links" });
   await expect(dlg).toBeVisible();
+  // v8 Part 2: focus moves inside the dialog on open, onto its Close button (the safe control).
+  await expect(dlg.getByTestId("share-close")).toBeFocused();
+  expect(await page.evaluate(() => !!document.activeElement?.closest("dialog[open]"))).toBe(true);
   await page.keyboard.press("Escape");
   await expect(dlg).toBeHidden();
   await expect(page.getByTestId("open-guest-links")).toBeFocused();

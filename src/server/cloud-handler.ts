@@ -12,7 +12,7 @@
 //   • Tokens are never logged, echoed or stored.
 import { z } from "zod";
 import { AgentState } from "@/schema";
-import { fail, issuesOf, logServer, ok, readJsonLimited, type HandlerResult } from "./http";
+import { clientIp, fail, issuesOf, logServer, ok, readJsonLimited, type HandlerResult } from "./http";
 import { limited, MAX_PLAN_BYTES } from "./events";
 import { CloudUpstreamError, type Caller, type CloudDoc, type CloudRepo } from "./cloud-repo";
 import type { EventStore } from "./store";
@@ -50,8 +50,8 @@ export function idTokenFrom(request: Request): string | null {
   return m && ID_TOKEN.test(m[1]!) ? m[1]! : null;
 }
 
-const ipOf = (request: Request) =>
-  (request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "local").slice(0, 64);
+/** The same client IP every rate limit uses (src/server/http.ts: x-real-ip, then the rightmost x-forwarded-for hop). */
+const ipOf = clientIp;
 
 type Authed = { ok: true; uid: string; caller: Caller; repo: CloudRepo } | { ok: false; result: HandlerResult };
 

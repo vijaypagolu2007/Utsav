@@ -1,6 +1,6 @@
 import { expect, test, type Browser, type Page, type Route } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { skipWelcome, switchEvent } from "./helpers";
+import { skipWelcome, switchEvent, ownClientIp } from "./helpers";
 
 // v8 Part 0c: delete event (soft delete). Overview's "Delete event" and the event menu's per-event Delete open a confirm;
 // the event moves to "Recently deleted" (Restore / Delete forever) with a 10 s Undo toast. v8 Part 0d: samples are
@@ -9,7 +9,8 @@ import { skipWelcome, switchEvent } from "./helpers";
 // Cloud: a tombstone propagates to other devices (two browser contexts sharing one in-test fake of /api/cloud/plans/*).
 
 const pageErrors: string[] = [];
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, info) => {
+  await ownClientIp(page, info);
   pageErrors.length = 0;
   page.on("pageerror", e => pageErrors.push(e.message));
   await skipWelcome(page);

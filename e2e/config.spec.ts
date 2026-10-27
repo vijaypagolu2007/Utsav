@@ -1,9 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { skipWelcome, switchEvent } from "./helpers";
+import { skipWelcome, switchEvent, ownClientIp } from "./helpers";
 
 // Configuration-driven templates, prompts and layouts, end to end.
 const pageErrors: string[] = [];
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, info) => {
+  await ownClientIp(page, info);
   pageErrors.length = 0;
   page.on("pageerror", e => pageErrors.push(e.message));
   await skipWelcome(page);

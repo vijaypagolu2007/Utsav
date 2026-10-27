@@ -46,9 +46,11 @@ A planning assistant for Indian weddings, birthdays and community events. It han
 
 ## Quality
 
-- **Security:** Zod at every boundary; guest permissions enforced on the server; hashed organizer tokens; body caps and upload sniffing; redacted logs; rate limiting.
-- **Testing:** 1,118 unit and API tests (Gemini mocked), 176 Playwright end-to-end tests, and a live Gemini smoke test.
+- **Security:** Zod at every boundary; guest permissions enforced on the server; hashed organizer tokens; body caps and upload sniffing; redacted logs; rate limiting, including the AI routes (per IP).
+- **Testing:** 1,174 unit and API tests (Gemini mocked) with a coverage gate, 183 Playwright end-to-end tests, and a live Gemini smoke test.
 - **Accessibility:** WCAG 2.2 AA target, axe on every page in light and dark from 320 to 1280 px, contrast unit-tested, 24 px minimum targets.
+
+- **Known trade-offs:** the planner renders client-side only (`ssr: false`), because the plan lives in your browser's localStorage and the cloud copy sits behind sign-in.
 
 ## Run it
 

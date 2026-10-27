@@ -73,6 +73,12 @@ export const RATE = {
   // wedding's worth of phones; plus a tighter limit per device token, so one browser can't flood the list.
   rsvpIp: { limit: 30, windowSec: 600 },
   rsvpDevice: { limit: 10, windowSec: 600 },
+  // v8 Part 2: the AI routes, per client IP (src/server/ai-limit.ts). Each call can cost a Gemini request (or several
+  // tool steps), so a person chatting is never near these and a script is stopped within a minute. Demo Mode answers
+  // count too: the server still parses and dry-runs the whole plan for every one.
+  aiChat: { limit: 30, windowSec: 60 },
+  aiScan: { limit: 10, windowSec: 60 },
+  aiPlan: { limit: 5, windowSec: 60 },
 } as const;
 
 function storeOr503(): { store: EventStore } | { result: HandlerResult } {

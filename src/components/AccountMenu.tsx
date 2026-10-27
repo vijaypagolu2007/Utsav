@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AlertTriangle, Cloud, CloudOff, Laptop, LayoutTemplate, LogIn, LogOut, RefreshCw } from "lucide-react";
 import { statusLabel, type SyncStatus } from "@/cloud-sync";
+import { flushStore } from "@/persistence";
 import { signInHref } from "@/signin";
 import { unavailableText } from "./cloud-auth";
 import type { CloudSync } from "./useCloudSync";
@@ -71,7 +72,7 @@ export default function AccountMenu({ cloud, onOpenChoice, onSignOut, onLoadSamp
   if (!user) {
     return (
       <div className="relative">
-        <Link href={signInHref(pathname)} data-testid="cloud-signin" data-available={cloud.unavailable ? "false" : "true"}
+        <Link href={signInHref(pathname)} onClick={() => flushStore()} data-testid="cloud-signin" data-available={cloud.unavailable ? "false" : "true"}
           title={cloud.unavailable ? `Sign-in unavailable. ${unavailableText(cloud.unavailable)}` : "Sign in with Google or email to save your plans to the cloud"}
           className="flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg border border-line-strong bg-surface px-3 text-sm font-medium text-sand-800 hover:bg-sand-100 max-md:h-11 pointer-coarse:h-11">
           <LogIn size={16} aria-hidden="true" className="text-brand-700" /> <span>Sign in</span>

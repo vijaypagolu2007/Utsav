@@ -10,7 +10,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, ArrowRight, LogIn, MailCheck, PartyPopper } from "lucide-react";
 import { authErrorMessage, markSignedInOnDevice, safeNextPath, skipSignInForSession, wasSignedInOnDevice } from "@/signin";
-import { markOnboarded } from "@/persistence";
+import { flushStore, markOnboarded } from "@/persistence";
 import { loadAuthState, unavailableText, type AuthApi, type UnavailableReason } from "./cloud-auth";
 
 type Phase = { kind: "loading" } | { kind: "ready"; api: AuthApi } | { kind: "unavailable"; reason: UnavailableReason };
@@ -58,6 +58,7 @@ export default function SignInPage() {
       // Already signed in (or just signed in): remember this device and go on, unless a new account's notice is showing.
       off = s.api.subscribe(u => {
         if (!u) return;
+        flushStore();
         markSignedInOnDevice();
         if (!holdRedirect.current) router.replace(nextRef.current);
       });
@@ -79,10 +80,11 @@ export default function SignInPage() {
 
   const google = async () => {
     if (!api || busy) return;
+    flushStore();
     setBusy("google"); setError(null); setInfo(null);
     try {
       const r = await api.signIn();
-      if (r.ok) { markSignedInOnDevice(); router.replace(nextRef.current); } else say(r.code, "google");
+      if (r.ok) { flushStore(); markSignedInOnDevice(); router.replace(nextRef.current); } else say(r.code, "google");
     } catch { say("", "google"); } finally { setBusy(null); }
   };
 
@@ -100,7 +102,7 @@ export default function SignInPage() {
       if (mode === "signin") {
         if (!api.signInWithEmail) { setError(unsupported); return; }
         const r = await api.signInWithEmail(addr, password);
-        if (r.ok) { markSignedInOnDevice(); router.replace(nextRef.current); } else say(r.code, "signin");
+        if (r.ok) { flushStore(); markSignedInOnDevice(); router.replace(nextRef.current); } else say(r.code, "signin");
       } else if (mode === "signup") {
         if (!api.signUpWithEmail) { setError(unsupported); return; }
         holdRedirect.current = true;

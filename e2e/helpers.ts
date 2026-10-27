@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Page, type TestInfo } from "@playwright/test";
 
 /**
  * A brand-new browser now opens on the welcome screen (plan your own event, or explore a sample). Most specs exercise
@@ -92,4 +92,13 @@ export async function switchEvent(page: Page, slot: string) {
   await page.getByTestId(`event-option-${slot}`).click();
   await expect(btn).toHaveAttribute("data-active", slot);
   await expect(btn).toHaveAttribute("aria-expanded", "false");
+}
+
+/**
+ * v8 Part 2: the AI routes (/api/chat, /api/plan, /api/scan-quote) are rate-limited per client IP, keyed on
+ * X-Forwarded-For like publishing. Give each test its own address (the pattern the publish tests already use), so the
+ * suite's many Co-Pilot calls never share one budget; the limits themselves are covered by the unit tests.
+ */
+export async function ownClientIp(page: Page, info: TestInfo) {
+  await page.setExtraHTTPHeaders({ "x-forwarded-for": `e2e-${info.testId}` });
 }
