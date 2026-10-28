@@ -11,7 +11,7 @@ import { geminiSchema } from "@/gemini-tools";
 import { parseQuoteText, QuoteValidationError, sampleQuote, scanToActions, SAMPLE_QUOTES, VisionExtraction, visionToScanned,
   type ScannedQuote, type ScanResponse } from "@/quote-scanner";
 import { fail, issuesOf, logServer, ok, type HandlerResult } from "./http";
-import { classifyProviderError, ProviderError, withDeadline, type GenerateFn } from "./gemini-client";
+import { classifyProviderError, GEMINI_MAX_OUTPUT_TOKENS, ProviderError, withDeadline, type GenerateFn } from "./gemini-client";
 
 /** Vercel functions accept ~4.5 MB request bodies; base64 adds a third, so files are capped at 3 MB. */
 export const SCAN_MAX_FILE_BYTES = 3 * 1024 * 1024;
@@ -168,6 +168,7 @@ List risky clauses (non-refundable deposits, corkage, overtime, cancellation, hi
       responseMimeType: "application/json",
       responseJsonSchema: geminiSchema(z.toJSONSchema(VisionExtraction, { target: "draft-2020-12", io: "input" })),
       temperature: 0,
+      maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS.scan,
     }, { signal }), deps.timeoutMs ?? geminiTimeoutMs(SCAN_TIMEOUT_MS, 55_000));
     if (!res || (res.text !== undefined && res.text !== null && typeof res.text !== "string")) throw new ProviderError("malformed_response", "No text in response");
     rawText = res.text ?? "";

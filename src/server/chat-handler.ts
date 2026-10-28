@@ -13,7 +13,7 @@ import { IdeaKind } from "@/schema";
 import type { Role } from "@/commands";
 import { todayIST } from "@/insights";
 import { fail, issuesOf, logServer, ok, type HandlerResult } from "./http";
-import { classifyProviderError, ProviderError, withDeadline, type Content, type FunctionDeclaration, type GenerateFn, type Part, type ProviderFailure } from "./gemini-client";
+import { classifyProviderError, GEMINI_MAX_OUTPUT_TOKENS, ProviderError, withDeadline, type Content, type FunctionDeclaration, type GenerateFn, type Part, type ProviderFailure } from "./gemini-client";
 
 export const CHAT_MAX_BODY_BYTES = 512 * 1024;
 export const CHAT_MAX_STEPS = 6;
@@ -134,7 +134,7 @@ async function runGeminiIdeas(generate: GenerateFn, plan: AgentState, today: str
     let res;
     try {
       res = await withDeadline(signal => generate({ contents, systemInstruction: SYSTEM_PROMPT(plan, today),
-        functionDeclarations: SUGGEST_IDEAS_DECL as unknown as FunctionDeclaration[], temperature: 0.7 }, { signal }), Math.min(stepMs, left));
+        functionDeclarations: SUGGEST_IDEAS_DECL as unknown as FunctionDeclaration[], temperature: 0.7, maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS.chat }, { signal }), Math.min(stepMs, left));
     } catch (e) { throw classifyProviderError(e); }
     const calls = Array.isArray(res?.functionCalls) ? res.functionCalls : [];
     const call = calls.find(c => c?.name === "suggest_ideas");
@@ -158,7 +158,7 @@ async function runGeminiVendorQuestions(generate: GenerateFn, plan: AgentState, 
   let res;
   try {
     res = await withDeadline(signal => generate({ contents: [{ role: "user", parts: [{ text: ask }] }], systemInstruction: SYSTEM_PROMPT(plan, today),
-      functionDeclarations: VENDOR_Q_DECL as unknown as FunctionDeclaration[], temperature: 0.4 }, { signal }), deps.totalTimeoutMs ? Math.min(stepMs, deps.totalTimeoutMs) : stepMs);
+      functionDeclarations: VENDOR_Q_DECL as unknown as FunctionDeclaration[], temperature: 0.4, maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS.chat }, { signal }), deps.totalTimeoutMs ? Math.min(stepMs, deps.totalTimeoutMs) : stepMs);
   } catch (e) { throw classifyProviderError(e); }
   const calls = Array.isArray(res?.functionCalls) ? res.functionCalls : [];
   const call = calls.find(c => c?.name === "suggest_vendor_questions");
@@ -192,6 +192,7 @@ async function runGeminiLoop(generate: GenerateFn, messages: z.infer<typeof Chat
         systemInstruction: guest ? GUEST_SYSTEM_PROMPT(working, actingEntryId) : SYSTEM_PROMPT(working, today),
         functionDeclarations: (guest ? guestFunctionDeclarations : functionDeclarations) as unknown as FunctionDeclaration[],
         temperature: 0.2,
+        maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS.chat,
       }, { signal }), Math.min(stepMs, left));
     } catch (e) { throw classifyProviderError(e); }
     if (!res || typeof res !== "object") throw new ProviderError("malformed_response", "Empty response");
