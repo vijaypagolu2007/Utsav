@@ -280,7 +280,11 @@ describe("header and floating Co-Pilot launcher (static checks)", () => {
     assert.match(app, /window\.location\.replace\(SIGNIN_PATH\)/);
   });
   test("the opening gate runs client-side only, before any plan renders", () => {
-    assert.match(src("../components/ClientRoot.tsx"), /ssr: false/);
+    // v8 Part 2c: the server and the hydration pass render the plan-free AppShell; PlannerApp (and this gate) only after.
+    const root = src("../components/ClientRoot.tsx");
+    assert.doesNotMatch(root, /ssr: false/);
+    assert.match(root, /useSyncExternalStore\(subscribe, \(\) => true, \(\) => false\)/);
+    assert.match(root, /useHydrated\(\) \? <PlannerApp>\{children\}<\/PlannerApp> : <AppShell \/>/);
     const gate = app.indexOf('if (opening === "signin" || opening === "wait")');
     assert.ok(gate > 0 && gate < app.indexOf("<CommandBar"), "the locked screen returns before the planner renders");
     assert.ok(gate < app.indexOf('if (opening === "welcome")'));
