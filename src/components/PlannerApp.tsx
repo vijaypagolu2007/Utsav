@@ -99,7 +99,7 @@ export default function PlannerApp({ children }: { children?: ReactNode }) {
     isPristine: (k, p) => isTemplateId(k) && isPristineSample(k, p),
     isRemoved: k => isTemplateId(k) && sampleRemoved(storeRef.current, k),
   });
-  // ---------- v8: sign-in-first opening (decided client-side after mount: this component never renders on the server) ----------
+  // ---------- v8: sign-in-first opening (decided client-side: this component never renders on the server or during hydration) ----------
   // Read once per mount; a sign-in seen while the planner is open counts as "signed in on this device" from then on
   // and ends this session's "without an account" choice (the same flags the sign-in page writes).
   const [device] = useState(() => ({ before: wasSignedInOnDevice(), skipped: signInSkipped() }));
@@ -129,7 +129,7 @@ export default function PlannerApp({ children }: { children?: ReactNode }) {
 
   // ---------- v8 Part 0b: My events / Samples, and the first sign-in choice ----------
   const account = cloud.user?.uid ?? null;
-  // The per-account answer lives in localStorage; reading it during render is safe because this component is client-only (ssr: false).
+  // The per-account answer lives in localStorage; reading it during render is safe because this component only renders on the client, after hydration (ClientRoot).
   const [choiceRead, setChoiceRead] = useState<{ uid: string | null; choice: FirstChoice | null }>({ uid: null, choice: null });
   if (choiceRead.uid !== account) setChoiceRead({ uid: account, choice: loadFirstChoice(account) });
   const firstChoice = choiceRead.uid === account ? choiceRead.choice : loadFirstChoice(account);

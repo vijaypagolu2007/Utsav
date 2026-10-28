@@ -50,7 +50,7 @@ A planning assistant for Indian weddings, birthdays and community events. It han
 - **Testing:** 1,174 unit and API tests (Gemini mocked) with a coverage gate, 183 Playwright end-to-end tests, and a live Gemini smoke test.
 - **Accessibility:** WCAG 2.2 AA target, axe on every page in light and dark from 320 to 1280 px, contrast unit-tested, 24 px minimum targets.
 
-- **Known trade-offs:** the planner renders client-side only (`ssr: false`), because the plan lives in your browser's localStorage and the cloud copy sits behind sign-in.
+- **Known trade-offs:** the plan renders client-side only, because it lives in your browser's localStorage and the cloud copy sits behind sign-in; the server renders the app shell (header, page navigation, the page heading and a skeleton) so pages are never blank.
 
 ## Run it
 

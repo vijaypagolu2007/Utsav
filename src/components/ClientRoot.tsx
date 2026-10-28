@@ -1,19 +1,18 @@
 "use client";
-import type { ReactNode } from "react";
-import dynamic from "next/dynamic";
+import { useSyncExternalStore, type ReactNode } from "react";
+import PlannerApp from "./PlannerApp";
+import AppShell from "./AppShell";
 
-// The planner reads localStorage and "today" on first render, so it renders client-only (no hydration mismatch).
-// The (planner) layout renders this once around every organizer page; the page arrives as children and renders
-// inside the shell, which keeps the plan state while the route changes.
-const PlannerApp = dynamic(() => import("./PlannerApp"), {
-  ssr: false,
-  loading: () => (
-    <div className="grid h-screen place-items-center text-sm text-sand-600">
-      <div className="flex items-center gap-3"><span className="h-3 w-3 animate-ping rounded-full bg-brand-500" /> Loading your event canvas…</div>
-    </div>
-  ),
-});
+const subscribe = () => () => {};
+/** False on the server and during hydration, true from the first client render after it (and on any later client mount). */
+const useHydrated = () => useSyncExternalStore(subscribe, () => true, () => false);
 
+// v8 Part 2c: the server renders AppShell (header frame, page navigation, the page's h1, a neutral skeleton), so the
+// first HTML is a real page instead of a blank loading pulse. The plan lives in this browser's localStorage, so
+// PlannerApp (which reads it, the theme and auth state while rendering) mounts right after hydration and never on the
+// server; a client navigation into the (planner) group mounts it directly. The (planner) layout renders this once around
+// every organizer page; the page arrives as children and renders inside the shell, which keeps the plan state while
+// the route changes.
 export default function ClientRoot({ children }: { children?: ReactNode }) {
-  return <PlannerApp>{children}</PlannerApp>;
+  return useHydrated() ? <PlannerApp>{children}</PlannerApp> : <AppShell />;
 }
