@@ -9,7 +9,7 @@ import { functionDeclarations } from "@/gemini-tools";
 import { blueprintFromSetup, setupBrief, SetupInput } from "@/setup";
 import type { AgentState } from "@/schema";
 import { fail, issuesOf, logServer, ok, type HandlerResult } from "./http";
-import { classifyProviderError, ProviderError, withDeadline, type Content, type FunctionDeclaration, type GenerateFn, type ProviderFailure } from "./gemini-client";
+import { classifyProviderError, GEMINI_MAX_OUTPUT_TOKENS, ProviderError, withDeadline, type Content, type FunctionDeclaration, type GenerateFn, type ProviderFailure } from "./gemini-client";
 
 export const PLAN_MAX_BODY_BYTES = 32 * 1024;
 export const PLAN_MAX_STEPS = 2;
@@ -55,7 +55,7 @@ export async function handleCreatePlan(raw: unknown, deps: PlanDeps): Promise<Ha
       let res;
       try {
         res = await withDeadline(signal => deps.generate!({ contents, systemInstruction: SETUP_SYSTEM,
-          functionDeclarations: INIT_DECL as unknown as FunctionDeclaration[], temperature: 0.4 }, { signal }), Math.min(stepMs, left));
+          functionDeclarations: INIT_DECL as unknown as FunctionDeclaration[], temperature: 0.4, maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS.plan }, { signal }), Math.min(stepMs, left));
       } catch (e) { throw classifyProviderError(e); }
       const call = (Array.isArray(res?.functionCalls) ? res.functionCalls : []).find(c => c?.name === "initialize_event_plan");
       if (!call || typeof call.args !== "object" || call.args === null || Array.isArray(call.args)) throw new ProviderError("malformed_response", "No initialize_event_plan call");

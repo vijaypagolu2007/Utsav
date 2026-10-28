@@ -4,8 +4,24 @@
 import { GoogleGenAI, type Content, type FunctionDeclaration, type Part, type ThinkingLevel } from "@google/genai";
 import { geminiThinkingLevel, isTransientGeminiError, withGeminiRetry } from "@/gemini-model";
 
+/**
+ * Output-token cap per route, sent as generationConfig.maxOutputTokens on every call. It bounds a runaway answer's
+ * cost and latency; it is not meant to shorten real answers. Thinking tokens count against the cap on Gemini 3, so
+ * each value leaves room for LOW/MEDIUM thinking on top of the largest schema-sized answer:
+ * - chat 4096: /api/chat turns (tool calls, short replies), "Get more ideas" (suggest_ideas, at most 8 cards of
+ *   120 + 400 characters, about 2k tokens at the schema maximum) and "Questions to ask" (at most 10 × 220 characters).
+ * - plan 8192: initialize_event_plan. The largest deterministic blueprint in the tests (community, 11 days,
+ *   12 sub-events) is about 4.4k characters (~1.5k tokens); the schema maximum (12 sub-events, 40 budget lines,
+ *   60 tasks, 80 run-of-show blocks) is roughly 20k characters (~6-7k tokens).
+ * - scan 4096: the vision quote extraction JSON (a vendor, amounts and a handful of short lists, ~1k tokens).
+ * A reply that stops at the cap (finishReason MAX_TOKENS) is truncated and is treated as malformed_response.
+ */
+export const GEMINI_MAX_OUTPUT_TOKENS = { chat: 4096, plan: 8192, scan: 4096 } as const;
+
 export type GenerateParams = {
   contents: Content[];
+  /** Always set from GEMINI_MAX_OUTPUT_TOKENS, so no call goes out uncapped. */
+  maxOutputTokens: number;
   systemInstruction?: string;
   functionDeclarations?: FunctionDeclaration[];
   responseMimeType?: "application/json";
@@ -16,7 +32,7 @@ export type GenerateParams = {
 export type GenerateResult = {
   text?: string | null;
   functionCalls?: { id?: string; name?: string; args?: unknown }[] | null;
-  candidates?: { content?: Content | null }[] | null;
+  candidates?: { content?: Content | null; finishReason?: string | null }[] | null;
 };
 export type GenerateFn = (p: GenerateParams, opts: { signal: AbortSignal }) => Promise<GenerateResult>;
 
@@ -37,6 +53,12 @@ export function classifyProviderError(e: unknown): ProviderError {
   if (isTransientGeminiError(e)) return new ProviderError("unavailable", "Gemini is temporarily unavailable", status);
   if (status === 400) return new ProviderError("bad_request", "Gemini rejected the request", 400);
   return new ProviderError("unknown", "Gemini call failed", Number.isFinite(status) ? status : undefined);
+}
+
+/** A reply cut off at maxOutputTokens is truncated (half a function call or JSON object): never use it. */
+export function assertNotTruncated<T extends GenerateResult | null | undefined>(res: T): T {
+  if (res?.candidates?.some(c => c?.finishReason === "MAX_TOKENS")) throw new ProviderError("malformed_response", "Gemini stopped at the output-token cap (finishReason MAX_TOKENS)");
+  return res;
 }
 
 export function isThinkingConfigRejected(e: unknown): boolean {
@@ -68,16 +90,20 @@ export function geminiGenerate(apiKey: string, opts: { retryDelaysMs?: number[] 
       ...(p.responseJsonSchema ? { responseJsonSchema: p.responseJsonSchema } : {}),
       ...(withThinking && thinkingLevel ? { thinkingConfig: { thinkingLevel: thinkingLevel as ThinkingLevel } } : {}),
       temperature: p.temperature ?? 0.2,
+      maxOutputTokens: p.maxOutputTokens,
     },
   });
   return (p, { signal }) => withGeminiRetry(async model => {
+    let res;
     try {
-      return await call(p, signal, model, true);
+      res = await call(p, signal, model, true);
     } catch (e) {
       // A model that doesn't accept thinkingLevel answers 400; ask once more without it rather than failing the turn.
-      if (thinkingLevel && isThinkingConfigRejected(e)) return call(p, signal, model, false);
-      throw e;
+      if (thinkingLevel && isThinkingConfigRejected(e)) res = await call(p, signal, model, false);
+      else throw e;
     }
+    // Not transient, so withGeminiRetry rethrows it at once; every route already falls back from malformed_response.
+    return assertNotTruncated(res as GenerateResult);
   }, { delaysMs: opts.retryDelaysMs ?? [800, 2000] }) as Promise<GenerateResult>;
 }
 

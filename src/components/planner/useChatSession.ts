@@ -1,8 +1,9 @@
 "use client";
 // The Co-Pilot conversation (one transcript per role), its busy flag and AI mode, and every call to /api/chat and
 // /api/scan-quote: chat, "Get more ideas", "Questions to ask" and the quote scanner. Moved out of PlannerApp in v8
-// Part 2, unchanged. Replies land through ingest → commitWith (Tier 0 auto-applies; everything else waits for Approve).
-import { useRef, useState } from "react";
+// Part 2; Part 2b made every transcript update a pure functional updater. Replies land through ingest → commitWith
+// (Tier 0 auto-applies; everything else waits for Approve).
+import { useLayoutEffect, useRef, useState } from "react";
 import type { AgentState, IdeaKind } from "@/schema";
 import type { BatchInput, BatchResult, BatchSource, Role } from "@/commands";
 import { runOfflineAgent, runOfflineGuestAgent, runOfflineIdeas, runOfflineVendorQuestions } from "@/offline";
@@ -12,6 +13,7 @@ import { sampleQuote, scanToActions, SAMPLE_QUOTES, type ScanResponse } from "@/
 import type { PlannerPage } from "@/routes";
 import type { ChatMsg, UIAction } from "../ChatSidebar";
 import { newId } from "./ids";
+import { withTranscript } from "./transcript";
 import type { ToastFn } from "./useToasts";
 import type { IdeasResult, QuestionsResult, ScanInput } from "./types";
 
@@ -38,12 +40,16 @@ type ChatDeps = {
 
 export function useChatSession({ role, setRole, actingEntryId, today, current, commitWith, toast, setAnnouncement, setElsewhere }: ChatDeps) {
   const [chats, setChats] = useState<Record<Role, ChatMsg[]>>({ organizer: [WELCOME.organizer], guest: [WELCOME.guest] });
+  // The committed transcripts, for reads after an await or outside render. Synced by a layout effect (before any
+  // event handler can run), never written by an updater: React Strict Mode runs updaters twice, so they stay pure.
   const chatsRef = useRef(chats);
+  useLayoutEffect(() => { chatsRef.current = chats; }, [chats]);
   const [busy, setBusy] = useState(false);
   const [ideasBusy, setIdeasBusy] = useState(false);
   const [forceOffline, setForceOffline] = useState(false);
   const [mode, setMode] = useState<"gemini" | "offline" | null>(null);
-  const setMsgs = (r: Role, f: (m: ChatMsg[]) => ChatMsg[]) => { chatsRef.current = { ...chatsRef.current, [r]: f(chatsRef.current[r]) }; setChats(chatsRef.current); };
+  /** Pure functional update of one role's transcript. Ids are made by the caller, before the call, never inside `f`. */
+  const setMsgs = (r: Role, f: (m: ChatMsg[]) => ChatMsg[]) => setChats(prev => withTranscript(prev, r, f));
 
   // ---------- chat ----------
   const setAction = (r: Role, msgId: string, actionId: string, patch: Partial<UIAction>) =>
@@ -51,7 +57,8 @@ export function useChatSession({ role, setRole, actingEntryId, today, current, c
 
   const ingest = (r: Role, res: Pick<ChatResponse, "reply" | "actions" | "warning"> & { mode?: ChatResponse["mode"] }, msgId: string) => {
     const ui: UIAction[] = res.actions.map((a: AgentAction) => ({ ...a, status: "pending" }) as UIAction);
-    setMsgs(r, ms => [...ms, { id: msgId, role: "assistant", text: res.reply, actions: ui, mode: res.mode, warning: res.warning }]);
+    const reply: ChatMsg = { id: msgId, role: "assistant", text: res.reply, actions: ui, mode: res.mode, warning: res.warning };
+    setMsgs(r, ms => [...ms, reply]);
     if (res.mode) setMode(res.mode);
     for (const a of ui) {
       if ((a.kind === "batch" && a.tier === 0) || a.kind === "ideas") {
@@ -116,11 +123,15 @@ export function useChatSession({ role, setRole, actingEntryId, today, current, c
     const r = role;
     // A message is always about the plan on screen: it never switches templates or resets anything. A sub-event this
     // plan doesn't have is answered by the reducer's own "No sub-event" explanation.
-    setMsgs(r, ms => [...ms, { id: nid(), role: "user", text: t }]);
+    const userMsg: ChatMsg = { id: nid(), role: "user", text: t };
+    // The history sent is computed here from the committed transcript plus this message, not read back from state
+    // that hasn't re-rendered yet, so it always ends with the message just typed.
+    const sent = [...(chatsRef.current[r] ?? []), userMsg];
+    setMsgs(r, ms => [...ms, userMsg]);
     setElsewhere([]);
     setBusy(true);
     const state = current();
-    const history = chatsRef.current[r].filter(m => m.id !== "welcome").slice(-12).map(m => ({ role: m.role, text: m.text.slice(0, 4000) }));
+    const history = sent.filter(m => m.id !== "welcome").slice(-12).map(m => ({ role: m.role, text: m.text.slice(0, 4000) }));
     const replyId = nid();
     try {
       const res = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" },
@@ -145,7 +156,8 @@ export function useChatSession({ role, setRole, actingEntryId, today, current, c
     if (busy) return;
     if (role !== "organizer") { setRole("organizer"); }
     const label = "sampleId" in input ? `sample "${SAMPLE_QUOTES.find(s => s.id === input.sampleId)?.title ?? "Sample quote"}"` : `file "${input.file.name}"`;
-    setMsgs("organizer", ms => [...ms, { id: nid(), role: "user", text: `Scan vendor quote: ${label}` }]);
+    const userMsg: ChatMsg = { id: nid(), role: "user", text: `Scan vendor quote: ${label}` };
+    setMsgs("organizer", ms => [...ms, userMsg]);
     setElsewhere([]);
     setBusy(true);
     const state = current();
