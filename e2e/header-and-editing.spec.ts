@@ -168,15 +168,24 @@ test("header: Undo/Redo, red flags, view toggle, More items, theme and Co-Pilot 
   await openPage(page, "Budget"); // the flag above opened the Tasks page, where its task lives
   await expect(page.getByRole("button", { name: /^Lock Haldi marigold decor/ })).toBeVisible();
   await expect(undo).toBeDisabled();
-  await more.click();
-  await page.getByLabel("Theme").selectOption("dark");
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await page.getByLabel("Theme").selectOption("light");
+  // v8 Part 3: the theme is a header toggle (no longer in More) that cycles System, Light, Dark.
+  const themeToggle = page.getByTestId("theme-toggle");
+  await expect(themeToggle).toHaveAttribute("aria-label", "Theme: System. Switch to Light");
+  await themeToggle.click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(themeToggle).toHaveAttribute("aria-label", "Theme: Light. Switch to Dark");
+  await themeToggle.press("Enter"); // keyboard works too (a native button)
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(themeToggle).toHaveAttribute("aria-label", "Theme: Dark. Switch to System");
+  await themeToggle.click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme-pref", "system");
+  await more.click();
+  await expect(page.getByTestId("theme-select")).toHaveCount(0); // gone from the More menu
   await page.keyboard.press("Escape");
 
   await page.getByRole("button", { name: "Guest View" }).click();
   await expect(page.getByRole("button", { name: "Guest View" })).toHaveAttribute("aria-pressed", "true");
+  await expect(themeToggle).toBeVisible(); // in the Guest View header too
   await page.getByRole("button", { name: "Organizer" }).click();
   await expect(page.getByRole("button", { name: "Organizer" })).toHaveAttribute("aria-pressed", "true");
 

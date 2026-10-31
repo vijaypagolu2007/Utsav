@@ -4,8 +4,8 @@ import { skipWelcome, switchEvent, ownClientIp } from "./helpers";
 
 // v8 Part 0c: delete event (soft delete). Overview's "Delete event" and the event menu's per-event Delete open a confirm;
 // the event moves to "Recently deleted" (Restore / Delete forever) with a 10 s Undo toast. v8 Part 0d: samples are
-// deletable too (with "Reset sample" next to Delete), "Restore samples" brings them back, and deleting every event
-// opens the setup form.
+// deletable too, "Restore samples" brings them back, and deleting every event opens the setup form. v8 Part 3b: Delete
+// sits in the Overview hero's title row (no "Reset sample" there; a sample resets from the More menu's Reset).
 // Cloud: a tombstone propagates to other devices (two browser contexts sharing one in-test fake of /api/cloud/plans/*).
 
 const pageErrors: string[] = [];
@@ -47,15 +47,16 @@ async function openMenu(page: Page) {
   await expect(page.getByTestId("event-menu")).toBeVisible();
 }
 
-test("delete from Overview (red outlined, right of Event name), confirm, then Undo from the toast", async ({ page }) => {
+test("delete from Overview (red outlined, right of the hero's title), confirm, then Undo from the toast", async ({ page }) => {
   await page.goto("/");
   await makeOwn(page, "wedding", "Asha & Ravi's wedding", "ev-own-wedding");
   const del = page.getByTestId("overview-delete-event");
   await expect(del).toBeVisible();
   await expect(page.getByTestId("overview-reset-sample")).toHaveCount(0);
-  // Right end of the Event name row.
-  const row = await page.getByTestId("event-details").boundingBox(), btn = await del.boundingBox();
+  // Right end of the hero header, on the title's row.
+  const row = await page.getByTestId("event-details").boundingBox(), btn = await del.boundingBox(), title = await h1(page).boundingBox();
   expect(btn!.x + btn!.width).toBeGreaterThan(row!.x + row!.width - 40);
+  expect(btn!.y).toBeLessThan(title!.y + title!.height);
   await del.click();
   const dialog = page.getByTestId("delete-dialog");
   await expect(dialog).toBeVisible();
@@ -165,16 +166,14 @@ test("keyboard: delete from the event menu (ArrowRight reaches the event's Delet
   await expect(page.getByRole("menuitem", { name: "Restore Asha & Ravi's wedding" })).toBeFocused();
 });
 
-test("a sample shows Delete event with Reset sample next to it; deleting it moves it to Recently deleted, and Undo brings it back", async ({ page }) => {
+test("a sample shows Delete event (no Reset sample on the Overview); deleting it moves it to Recently deleted, and Undo brings it back", async ({ page }) => {
   await page.goto("/");
   const del = page.getByTestId("overview-delete-event");
-  const reset = page.getByTestId("overview-reset-sample");
   await expect(del).toBeVisible();
-  await expect(reset).toBeVisible();
-  // Delete is the rightmost button of the Event name row; Reset sample sits just before it.
-  const row = await page.getByTestId("event-details").boundingBox(), d = await del.boundingBox(), r = await reset.boundingBox();
+  await expect(page.getByTestId("overview-reset-sample")).toHaveCount(0);
+  // Delete is at the right end of the hero header.
+  const row = await page.getByTestId("event-details").boundingBox(), d = await del.boundingBox();
   expect(d!.x + d!.width).toBeGreaterThan(row!.x + row!.width - 40);
-  expect(r!.x).toBeLessThan(d!.x);
   // Every row of the menu has its Delete, samples included.
   await openMenu(page);
   for (const slot of ["wedding", "birthday", "community"]) await expect(page.getByTestId(`event-delete-${slot}`)).toBeVisible();
@@ -205,13 +204,14 @@ test("a sample shows Delete event with Reset sample next to it; deleting it move
   await expect(page.getByTestId("recently-deleted")).toHaveCount(0);
   await expect(page.getByTestId("event-restore-samples")).toHaveCount(0);
   await expect(page.getByRole("group", { name: "Samples" }).getByRole("menuitemradio")).toHaveCount(3);
-  // Reset sample still works on a sample.
+  // A sample still resets from the More menu's Reset.
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Edit event name", exact: true }).click();
   await page.getByRole("textbox", { name: "event name", exact: true }).fill("Edited sample");
   await page.keyboard.press("Enter");
   await expect(h1(page)).toHaveText("Edited sample");
-  await reset.click();
+  await page.getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Reset" }).click();
   await expect(h1(page)).toHaveText("Arjun & Meera — Royal Telugu Wedding");
 });
 

@@ -41,7 +41,7 @@ function RsvpLink({ url, plan }: { url: string; plan: AgentState }) {
   };
   return (
     <div data-testid="share-rsvp">
-      <label htmlFor={fieldId} className="text-xs font-semibold uppercase tracking-wide text-ink-muted">RSVP link</label>
+      <label htmlFor={fieldId} className="text-xs font-semibold text-ink-muted">RSVP link</label>
       <input id={fieldId} ref={field} readOnly value={url} data-testid="rsvp-guest-link" onFocus={e => e.currentTarget.select()}
         aria-describedby={state === "manual" ? hintId : undefined}
         className="mt-1 h-11 w-full truncate rounded-lg border border-line-strong bg-surface-muted px-2 font-mono text-xs text-sand-800" />
@@ -98,24 +98,24 @@ function ShareDialogOpen({ onClose, share, status, onPublish, onSync, onForget, 
       onPointerDown={e => { downOnBackdrop.current = e.target === e.currentTarget; }}
       onClick={e => { if (downOnBackdrop.current && e.target === e.currentTarget) onClose(); downOnBackdrop.current = false; }}
       className="m-auto max-h-[min(85dvh,100%)] w-[calc(100%-2rem)] max-w-xl overflow-hidden rounded-2xl border border-line bg-surface p-0 text-ink shadow-xl backdrop:bg-sand-900/40">
-      <div className="max-h-[min(85dvh,100%)] overflow-y-auto overscroll-contain p-5">
-        <div className="mb-3 flex items-center gap-2">
+      <div className="max-h-[min(85dvh,100%)] overflow-y-auto overscroll-contain p-5 sm:p-6">
+        <div className="mb-4 flex items-center gap-2">
           <Link2 size={18} aria-hidden="true" className="text-brand-700" />
-          <h2 id="share-title" className="text-base font-semibold">Guest links</h2>
-          <button ref={closeRef} type="button" onClick={onClose} data-testid="share-close" className="ml-auto grid h-11 w-11 place-items-center rounded-lg text-sand-700 hover:bg-sand-100" aria-label="Close" title="Close (Esc)"><X size={18} aria-hidden="true" /></button>
+          <h2 id="share-title" className="text-lg font-semibold leading-snug">Guest links</h2>
+          <button ref={closeRef} type="button" onClick={onClose} data-testid="share-close" className="-my-2 -mr-2 ml-auto grid h-11 w-11 place-items-center rounded-lg text-sand-700 hover:bg-sand-100 hover:text-ink" aria-label="Close" title="Close (Esc)"><X size={18} aria-hidden="true" /></button>
         </div>
-        <p className="mb-3 text-sm text-ink-muted" data-testid="share-intro">
+        <p className="mb-4 text-sm leading-relaxed text-ink-muted" data-testid="share-intro">
           Share this one link with everyone. Each family fills in one short form and sees the schedule, venues and dress codes,
           never your budget, vendors or other guests. The RSVP dashboard is on the Guests page.
         </p>
         {status.state === "unconfigured" && (
-          <div className="mb-3 space-y-1 rounded-lg bg-amber-50 p-3 text-xs text-amber-900 ring-1 ring-inset ring-amber-300" role="alert" data-testid="share-unconfigured">
+          <div className="mb-4 space-y-1 rounded-lg bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-inset ring-amber-300" role="alert" data-testid="share-unconfigured">
             <p className="font-semibold">Guest links aren&apos;t available on this server yet: it has nowhere to store the shared copy.</p>
             <p>Running it yourself? <code>npm run dev</code> works as is. For <code>npm start</code>, add <code>UTSAV_STORE=file</code> to <code>.env.local</code> and restart. On Vercel, connect Upstash Redis.</p>
             {status.message && <p className="text-amber-900">Server said: {status.message}</p>}
           </div>
         )}
-        {status.state === "error" && <div className="mb-3 rounded-lg bg-red-50 p-2 text-xs text-red-700" role="alert">{status.message}</div>}
+        {status.state === "error" && <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700" role="alert">{status.message}</div>}
         {!share ? (
           <button type="button" onClick={onPublish} disabled={status.state === "publishing"} data-testid="publish-guest-links"
             className="min-h-11 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-hover disabled:opacity-50">

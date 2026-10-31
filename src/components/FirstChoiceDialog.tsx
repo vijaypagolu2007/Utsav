@@ -31,9 +31,9 @@ function FirstChoiceOpen({ name, onOwn, onSamples, onClose }: { name: string; on
     <dialog ref={ref} aria-labelledby={titleId} aria-describedby={descId} data-testid="first-choice-dialog"
       onClose={() => { if (!ref.current?.open) onClose(); }}
       className="m-auto max-h-[min(85dvh,100%)] w-[calc(100%-2rem)] max-w-lg overflow-hidden rounded-2xl border border-line bg-surface p-0 text-ink shadow-xl backdrop:bg-sand-900/40">
-      <div className="max-h-[min(85dvh,100%)] overflow-y-auto overscroll-contain p-5">
-        <h2 id={titleId} className="text-base font-semibold">{greeting ? `Welcome, ${greeting}. How would you like to start?` : "How would you like to start?"}</h2>
-        <p id={descId} className="mt-1 text-sm text-ink-muted">Your account has no events yet. Nothing is saved to it until you choose.</p>
+      <div className="max-h-[min(85dvh,100%)] overflow-y-auto overscroll-contain p-5 sm:p-6">
+        <h2 id={titleId} className="text-lg font-semibold leading-snug">{greeting ? `Welcome, ${greeting}. How would you like to start?` : "How would you like to start?"}</h2>
+        <p id={descId} className="mt-2 text-sm leading-relaxed text-ink-muted">Your account has no events yet. Nothing is saved to it until you choose.</p>
         <ul className="mt-4 grid gap-3">
           <li>
             <button ref={first} type="button" onClick={onOwn} data-testid="first-choice-own"

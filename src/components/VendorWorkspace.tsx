@@ -53,7 +53,7 @@ function AddVendorForm({ row, onDone }: { row: ChecklistRow; onDone: () => void 
   };
   const field = "mt-1 h-11 w-full rounded-lg border border-line-strong bg-surface px-3 text-sm text-ink";
   return (
-    <form noValidate onSubmit={submit} aria-label={`Add a vendor for ${row.slot.label}`} data-testid={`add-vendor-form-${row.slot.key}`} className="mt-2 grid gap-2 rounded-xl border border-line bg-surface-muted p-3 sm:grid-cols-[1fr_12rem_auto] sm:items-end">
+    <form noValidate onSubmit={submit} aria-label={`Add a vendor for ${row.slot.label}`} data-testid={`add-vendor-form-${row.slot.key}`} className="mt-2 grid gap-2 rounded-lg border border-line bg-surface-muted p-4 sm:grid-cols-[1fr_12rem_auto] sm:items-end">
       <div><label htmlFor={`${id}-n`} className="text-sm font-medium text-ink">Vendor name</label><input id={`${id}-n`} value={name} onChange={e => setName(e.target.value)} maxLength={120} className={field} /></div>
       <div><label htmlFor={`${id}-p`} className="text-sm font-medium text-ink">Phone (optional)</label><input id={`${id}-p`} value={phone} onChange={e => setPhone(e.target.value)} maxLength={30} inputMode="tel" className={field} /></div>
       <div className="flex gap-2">
@@ -88,7 +88,7 @@ function VendorLine({ v, plan }: { v: Vendor; plan: AgentState }) {
         <span className="flex w-full flex-wrap items-center gap-2 sm:ml-auto sm:w-auto">
           <label className="sr-only" htmlFor={`stage-${v.id}`}>Stage for {v.name}</label>
           <select id={`stage-${v.id}`} value={v.stage} onChange={e => setStage(e.target.value as VendorStage)} data-testid={`vendor-stage-${v.id}`}
-            className="h-9 rounded-lg border border-line-strong bg-surface px-2 text-sm text-ink max-md:h-11">
+            className="h-9 rounded-lg border border-line-strong bg-surface px-3 text-sm text-ink max-md:h-11">
             {STAGES.map(s => <option key={s} value={s}>{STAGE_LABEL[s]}</option>)}
           </select>
           <button type="button" onClick={() => setPending({ batch: { summary: `Remove vendor ${v.name}`, commands: [{ op: "remove_vendor", vendorId: v.id }] }, label: `Review: remove ${v.name}` })}
@@ -114,7 +114,7 @@ export function QuoteComparison({ row, plan }: { row: ChecklistRow; plan: AgentS
       {/* Below 640px: one card per quote, same facts, no sideways scrolling. */}
       <ul className="space-y-2 sm:hidden" aria-label={`Quotes for ${row.slot.label}, compared`}>
         {qs.map(q => (
-          <li key={q.vendorId} className="rounded-xl border border-line bg-surface p-3 text-sm text-ink">
+          <li key={q.vendorId} className="rounded-lg border border-line bg-surface p-4 text-sm text-ink">
             <p className="flex flex-wrap items-center gap-2 font-semibold">{q.vendorName}<FigureTag kind="quoted" />
               {q.perGuestPaise === cheapest && qs.length > 1 && <Chip tone="success" icon={<Check size={12} />}>Lowest per guest</Chip>}</p>
             <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 tabular-nums">
@@ -179,7 +179,7 @@ function SlotRow({ row, plan }: { row: ChecklistRow; plan: AgentState }) {
   const hid = `slot-${row.slot.key}-h`;
   return (
     <li data-testid={`vendor-slot-${row.slot.key}`} data-status={row.status} className={`rounded-xl border ${off ? "border-dashed border-line-strong bg-sand-50" : "border-line bg-surface"}`}>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-3 sm:px-4">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
         <h3 id={hid} className="min-w-0 flex-1 basis-full sm:basis-48">
           <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open} className="flex min-h-10 w-full items-center gap-2 text-left">
             <span aria-hidden="true" className="shrink-0 text-sand-600">{open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}</span>
@@ -194,7 +194,7 @@ function SlotRow({ row, plan }: { row: ChecklistRow; plan: AgentState }) {
         <FigureTag kind="estimate" />
       </div>
       {open && (
-        <div className="space-y-3 border-t border-line-soft px-3 pb-3 pt-2 sm:px-4">
+        <div className="space-y-4 border-t border-line-soft px-4 pb-4 pt-4">
           {!off && <Steps status={row.status} />}
           <p className="text-sm text-ink"><span className="font-medium">What you need from them: </span>{row.slot.need}</p>
           {row.vendors.length > 0 ? <ul className="space-y-2">{row.vendors.map(v => <VendorLine key={v.id} v={v} plan={plan} />)}</ul>
@@ -227,7 +227,7 @@ export default function VendorWorkspace() {
       subtitle={<>What a {plan.event.eventType} like this usually needs. <span className="font-medium text-ink" data-testid="vendor-progress">{p.booked} of {p.total} booked</span>. Figures are labelled: Estimate (your plan), Quoted (a vendor’s quote), Committed (signed), Unverified (no quote yet).</>}>
       <ul className="space-y-3" data-testid="vendor-checklist">{rows.map(r => <SlotRow key={r.slot.key} row={r} plan={plan} />)}</ul>
       {unassigned.length > 0 && (
-        <div className="mt-5">
+        <div className="mt-6">
           <h3 className="mb-2 text-base font-semibold text-ink">Other vendors</h3>
           <ul className="space-y-2">{unassigned.map(v => <VendorLine key={v.id} v={v} plan={plan} />)}</ul>
         </div>

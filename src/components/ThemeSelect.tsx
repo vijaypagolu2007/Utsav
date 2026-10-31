@@ -14,7 +14,7 @@ export default function ThemeSelect({ className = "" }: { className?: string }) 
     <div className={className}>
       <label htmlFor={id} className="flex items-center gap-1.5 text-sm font-medium text-ink"><Icon size={16} aria-hidden="true" /> Theme</label>
       <select id={id} value={pref} onChange={e => { if (isThemePref(e.target.value)) setThemePref(e.target.value); }} data-testid="theme-select"
-        className="mt-1 h-11 w-full rounded-lg border border-line-strong bg-surface px-2 text-sm text-ink">
+        className="mt-1 h-11 w-full rounded-lg border border-line-strong bg-surface px-3 text-sm text-ink">
         {THEME_PREFS.map(p => <option key={p} value={p}>{THEME_LABELS[p]}{p === "system" ? " (match device)" : ""}</option>)}
       </select>
     </div>

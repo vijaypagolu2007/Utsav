@@ -47,25 +47,25 @@ export default function JoinPage({ eventId }: { eventId: string }) {
   };
 
   const shell = (children: ReactNode) => (
-    <main className="mx-auto max-w-lg space-y-4 p-4 pb-16" data-testid="join-page">{children}<footer className="border-t border-line pt-4"><ThemeSelect className="max-w-60" /></footer></main>
+    <main className="mx-auto w-full max-w-lg space-y-6 px-4 pb-16 pt-6 sm:px-6 sm:pt-10" data-testid="join-page">{children}<footer className="border-t border-line pt-6"><ThemeSelect className="max-w-60" /></footer></main>
   );
-  if (error) return shell(<div className="rounded-2xl border border-line bg-surface p-6 text-center shadow-sm" role="alert" data-testid="join-error"><h1 className="mb-2 text-lg font-semibold text-ink">Join link unavailable</h1><p className="text-sm text-ink-muted">{error}</p></div>);
+  if (error) return shell(<div className="rounded-xl border border-line bg-surface p-6 text-center shadow-sm" role="alert" data-testid="join-error"><h1 className="mb-2 text-lg font-semibold text-ink">Join link unavailable</h1><p className="text-sm text-ink-muted">{error}</p></div>);
   if (!info) return shell(<p className="py-16 text-center text-sm text-ink-muted" aria-busy="true">Loading…</p>);
   const input = "mt-1 block min-h-11 w-full rounded-lg border border-line-strong bg-surface px-3 text-base text-ink";
   return shell(
     <>
-      <section className="hero-silk rounded-3xl p-5 text-white shadow-lg sm:p-6">
-        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest"><PartyPopper size={14} aria-hidden="true" /> Join the guest list</div>
-        <h1 className="mt-1 break-words text-2xl font-bold">{info.title}</h1>
-        <p className="text-sm">{info.hosts ? `${info.hosts} · ` : ""}{info.city} · {prettyDate(info.startDate)}{info.endDate !== info.startDate ? ` – ${prettyDate(info.endDate)}` : ""}</p>
+      <section className="hero-silk rounded-2xl p-6 text-white shadow-lg sm:p-8">
+        <div className="flex items-center gap-2 text-sm font-medium"><PartyPopper size={16} aria-hidden="true" /> Join the guest list</div>
+        <h1 className="mt-2 break-words text-2xl font-semibold leading-tight sm:text-3xl">{info.title}</h1>
+        <p className="mt-2 text-sm">{info.hosts ? `${info.hosts} · ` : ""}{info.city} · {prettyDate(info.startDate)}{info.endDate !== info.startDate ? ` – ${prettyDate(info.endDate)}` : ""}</p>
       </section>
       {done ? (
-        <div role="status" className="rounded-2xl border border-line bg-surface p-5 shadow-sm" data-testid="join-done">
+        <div role="status" className="rounded-xl border border-line bg-surface p-6 shadow-sm" data-testid="join-done">
           <p className="flex items-center gap-2 text-base font-semibold text-ink"><CheckCircle2 size={18} aria-hidden="true" className="text-emerald-700" />Thank you!</p>
           <p className="mt-1 text-sm text-ink-muted">{done}</p>
         </div>
       ) : (
-        <form onSubmit={submit} noValidate className="space-y-3 rounded-2xl border border-line bg-surface p-5 shadow-sm" data-testid="join-form">
+        <form onSubmit={submit} noValidate className="space-y-4 rounded-xl border border-line bg-surface p-4 shadow-sm sm:p-6" data-testid="join-form">
           <p className="text-sm text-ink-muted">Add your household so the hosts can send you a personal RSVP link.</p>
           <label className="block text-sm font-medium text-ink">Your name <span aria-hidden="true" className="text-danger">*</span>
             <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required maxLength={80} autoComplete="name" data-testid="join-name"

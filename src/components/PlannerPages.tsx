@@ -23,63 +23,64 @@ import VendorWorkspace from "./VendorWorkspace";
 import TaskCard from "./TaskCard";
 import TimelineCard from "./TimelineCard";
 import ArchetypeCard from "./ArchetypeCard";
-import { accentTone, Card, Chip, hhmm, inr, InlineEdit, prettyDate, relDays, saveWith } from "./ui";
+import { accentTone, buttonClass, Card, Chip, hhmm, inr, InlineEdit, prettyDate, relDays, saveWith } from "./ui";
 
 /**
  * Every page opens with its one h1. Client navigation moves focus here (tabIndex -1 makes it focusable from script
  * without adding a Tab stop), so it is also where a screen reader picks up on the new page.
  */
-function PageHeading({ page, heading, headingId, children }: { page: PageId; heading?: ReactNode; headingId?: string; children?: ReactNode }) {
+function PageHeading({ page }: { page: PageId }) {
   const p = pageById(page);
   return (
-    <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
-      <div className="min-w-0">
-        {heading !== undefined && <p className="text-sm font-semibold uppercase tracking-wider text-ink-muted">{p.label}</p>}
-        <h1 id={headingId} tabIndex={-1} data-testid="page-heading" className="break-words text-2xl font-semibold leading-tight text-ink focus-visible:outline-offset-4 sm:text-3xl">{heading ?? p.title}</h1>
-        <p className="mt-1 max-w-3xl text-sm text-ink-muted">{p.description}</p>
-      </div>
-      {children}
+    <div className="min-w-0">
+      <h1 tabIndex={-1} data-testid="page-heading" className="break-words text-2xl font-semibold leading-tight text-ink focus-visible:outline-offset-4 sm:text-3xl">{p.title}</h1>
+      <p className="mt-2 max-w-2xl text-sm leading-relaxed text-ink-muted">{p.description}</p>
     </div>
   );
 }
 
-const Frame = ({ children }: { children: ReactNode }) => <div className="mx-auto max-w-[100rem] space-y-5">{children}</div>;
+/** The page column: one max-width (80rem) and one vertical rhythm (24px between blocks) on every planner page. */
+const Frame = ({ children }: { children: ReactNode }) => <div className="mx-auto w-full max-w-7xl space-y-6">{children}</div>;
 
 // ---------------------------------------------------------------- Overview
 /**
- * Event name and, for weddings, the couple: edited in place (Tier 0 renames through the reducer). At the right end,
- * "Delete event" (red, outlined) for every event; v8 Part 0d: samples too, with a secondary "Reset sample" before it.
+ * The Overview hero's header (v8 Part 3b: the separate event-name row is folded in here). The h1 is the event's name
+ * with its own pencil (the same in-place rename, "Edit event name"); for weddings the couple's names are edited on a
+ * compact line under the subtitle, beside the event type chip; "Delete event" (red, outlined) sits at the right of the
+ * title row for every event, samples included. A sample is reset from the More menu's Reset. Below 640px the title
+ * block takes the full width, so a long name wraps and the button drops below it.
  */
-function EventDetails({ plan, commit, actions }: { plan: AgentState; commit: Commit; actions: { isSample: boolean; requestDelete: () => void; resetSample: () => void } }) {
+function OverviewHeader({ plan, commit, chip, requestDelete }: { plan: AgentState; commit: Commit; chip: ReactNode; requestDelete: () => void }) {
+  const p = pageById("overview");
   const ext = plan.event.ext;
   const couple = ext.type === "wedding" ? ext.partners : null;
   const setPartner = (i: 0 | 1) => (name: string) => couple && saveWith(commit, { summary: "Update the couple's names",
     commands: [{ op: "set_partner_names", partners: i === 0 ? [name, couple[1]] : [couple[0], name] }] });
+  // One grid: the title (with its pencil) and Delete event share the first row; the subtitle and the chip / couple line
+  // sit under the title in the left column. Below 640px it is one column and Delete event moves to the end.
   return (
-    <div className="flex flex-wrap items-center gap-x-5 gap-y-1 rounded-xl border border-line bg-surface px-3 py-1.5 text-sm sm:px-4" data-testid="event-details">
-      <InlineEdit label="event name" value={plan.event.title} inputSize="w-72"
+    <div data-testid="event-details" className="grid grid-cols-1 gap-y-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-x-6">
+      <InlineEdit label="event name" value={plan.event.title} inputSize="w-72 sm:w-[28rem]" top className="sm:col-start-1 sm:row-start-1"
         onSave={(title: string) => saveWith(commit, { summary: "Rename the event", commands: [{ op: "rename_event", title }] })}>
-        <span className="text-ink-muted">Event name: <span className="font-medium text-ink">{plan.event.title}</span></span>
+        <h1 id="overview-h" tabIndex={-1} data-testid="page-heading" className="break-words text-2xl font-semibold leading-tight text-ink focus-visible:outline-offset-4 sm:text-3xl">{plan.event.title}</h1>
       </InlineEdit>
-      {couple && (
-        <span className="flex flex-wrap items-center gap-x-1 text-ink-muted">Couple:
-          <InlineEdit label="first partner's name" value={couple[0]} inputSize="w-40" onSave={setPartner(0)}><span className="font-medium text-ink">{couple[0] || "(not set)"}</span></InlineEdit>
-          <span aria-hidden="true">&amp;</span><span className="sr-only">and</span>
-          <InlineEdit label="second partner's name" value={couple[1]} inputSize="w-40" onSave={setPartner(1)}><span className="font-medium text-ink">{couple[1] || "(not set)"}</span></InlineEdit>
-        </span>
-      )}
-      <span className="ml-auto flex flex-wrap justify-end gap-2 py-0.5">
-        {actions.isSample && (
-          <button type="button" onClick={actions.resetSample} data-testid="overview-reset-sample" title="Restore this sample as shipped (clears its history)"
-            className="flex min-h-9 items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-3 text-sm font-medium text-sand-800 hover:bg-sand-100 max-md:min-h-11 pointer-coarse:min-h-11">
-            <RotateCcw size={15} aria-hidden="true" /> Reset sample
-          </button>
-        )}
-        <button type="button" onClick={actions.requestDelete} data-testid="overview-delete-event" aria-haspopup="dialog"
-          className="flex min-h-9 items-center gap-1.5 rounded-lg border border-red-600 bg-surface px-3 text-sm font-semibold text-red-700 hover:bg-red-50 max-md:min-h-11 pointer-coarse:min-h-11">
-          <Trash2 size={15} aria-hidden="true" /> Delete event
-        </button>
-      </span>
+      <button type="button" onClick={requestDelete} data-testid="overview-delete-event" aria-haspopup="dialog"
+        className="inline-flex min-h-9 shrink-0 items-center justify-center gap-2 justify-self-start rounded-lg border border-red-600 bg-surface px-4 text-sm font-semibold text-red-700 hover:bg-red-50 active:bg-red-100 max-md:min-h-11 max-sm:order-last pointer-coarse:min-h-11 sm:col-start-2 sm:row-start-1 sm:justify-self-end">
+        <Trash2 size={16} aria-hidden="true" /> Delete event
+      </button>
+      <div className="min-w-0 space-y-3 sm:col-start-1">
+        <p className="max-w-2xl text-sm leading-relaxed text-ink-muted">{p.description}</p>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+          {chip}
+          {couple && (
+            <span className="flex min-w-0 flex-wrap items-center gap-x-1 text-ink-muted">Couple:
+              <InlineEdit label="first partner's name" value={couple[0]} inputSize="w-40" onSave={setPartner(0)}><span className="font-medium text-ink">{couple[0] || "(not set)"}</span></InlineEdit>
+              <span aria-hidden="true">&amp;</span><span className="sr-only">and</span>
+              <InlineEdit label="second partner's name" value={couple[1]} inputSize="w-40" onSave={setPartner(1)}><span className="font-medium text-ink">{couple[1] || "(not set)"}</span></InlineEdit>
+            </span>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -88,9 +89,9 @@ function EventDetails({ plan, commit, actions }: { plan: AgentState; commit: Com
 function SummaryCard({ page, icon, children }: { page: PageId; icon: ReactNode; children: ReactNode }) {
   const p = pageById(page);
   return (
-    <Card title={p.label} icon={icon} className="flex flex-col" bodyClassName="flex flex-1 flex-col gap-3">
-      <div className="flex-1 space-y-2 text-sm" data-testid={`summary-${page}`}>{children}</div>
-      <Link href={p.href} className="inline-flex min-h-11 items-center gap-1.5 self-start rounded-lg px-2 text-sm font-semibold text-brand-800 underline-offset-2 hover:bg-brand-50 hover:underline md:min-h-9">
+    <Card title={p.label} icon={icon} className="flex flex-col" bodyClassName="flex flex-1 flex-col gap-4">
+      <div className="flex-1 space-y-3 text-sm" data-testid={`summary-${page}`}>{children}</div>
+      <Link href={p.href} className={buttonClass("ghost", "md", "-mx-3 self-start px-3")}>
         View {p.label.toLowerCase()}<ArrowRight size={15} aria-hidden="true" />
       </Link>
     </Card>
@@ -101,7 +102,7 @@ function SummaryCard({ page, icon, children }: { page: PageId; icon: ReactNode; 
 function Bar({ value, max, tone = "bg-emerald-700" }: { value: number; max: number; tone?: string }) {
   const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0;
   return (
-    <div aria-hidden="true" className="h-2 w-full overflow-hidden rounded-full bg-sand-100 ring-1 ring-inset ring-sand-400">
+    <div aria-hidden="true" className="h-1.5 w-full overflow-hidden rounded-full bg-sand-100 ring-1 ring-inset ring-sand-400">
       <div className={`h-full rounded-full ${tone}`} style={{ width: `${pct}%` }} />
     </div>
   );
@@ -215,16 +216,14 @@ export function OverviewPage() {
   const { plan, today, insights, template, commit, showInsight, eventActions } = usePlanner();
   return (
     <Frame>
-      <section id="overview" aria-labelledby="overview-h" data-event-type={plan.event.eventType} className="festive-hero -mx-3 -mt-4 space-y-3 px-3 py-4 sm:mx-0 sm:mt-0 sm:rounded-2xl sm:p-5">
-        <PageHeading page="overview" heading={plan.event.title} headingId="overview-h">
-          <Chip tone={accentTone(template.accent)} icon={<MapPin size={13} />} className="capitalize">{plan.event.eventType} · {plan.event.city}</Chip>
-        </PageHeading>
-        <EventDetails plan={plan} commit={commit} actions={eventActions} />
+      <section id="overview" aria-labelledby="overview-h" data-event-type={plan.event.eventType} className="festive-hero -mx-4 -mt-6 space-y-6 px-4 py-6 sm:mx-0 sm:mt-0 sm:rounded-2xl sm:p-6 sm:shadow-sm lg:p-8">
+        <OverviewHeader plan={plan} commit={commit} requestDelete={eventActions.requestDelete}
+          chip={<Chip tone={accentTone(template.accent)} icon={<MapPin size={13} />} className="capitalize">{plan.event.eventType} · {plan.event.city}</Chip>} />
         <KpiStrip kpis={kpisFor("organizer", plan.event.eventType)} ctx={kpiContext(plan, today)} />
       </section>
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start">
         <AttentionPanel plan={plan} insights={insights} onShow={showInsight} />
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-1 2xl:grid-cols-2">
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-1">
           <BudgetSummary plan={plan} today={today} />
           <TasksSummary plan={plan} today={today} />
           <ScheduleSummary plan={plan} today={today} />
@@ -243,7 +242,7 @@ export function BudgetPage() {
     <Frame>
       <PageHeading page="budget" />
       <BudgetCard plan={plan} today={today} commit={commit} highlight={highlight} onScan={scan} busy={busy} />
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2 xl:items-start">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 xl:items-start">
         <PrioritiesPanel plan={plan} commit={commit} />
         <WhatIfPanel plan={plan} commit={commit} />
       </div>
@@ -287,11 +286,11 @@ export function SetupPage() {
     <Frame>
       {/* v8 Part 0d: every event (samples too) was deleted: say so, and offer the samples back next to a new event. */}
       {eventActions.noEvents && (
-        <div role="note" data-testid="no-events" className="rounded-2xl border border-line bg-surface p-4 shadow-sm sm:p-5">
+        <div role="note" data-testid="no-events" className="rounded-xl border border-line bg-surface p-4 shadow-sm sm:p-6">
           <p className="text-lg font-semibold text-ink">You have no events right now</p>
           <p className="mt-1 text-sm text-ink-muted">Start a new event below, bring back the three samples, or restore a deleted event from <span className="font-medium text-ink">Recently deleted</span> in the event menu (kept for 30 days).</p>
           <button type="button" onClick={eventActions.restoreSamples} data-testid="setup-restore-samples"
-            className="mt-3 flex min-h-11 items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-4 text-sm font-semibold text-sand-800 hover:bg-sand-100">
+            className={buttonClass("secondary", "lg", "mt-4")}>
             <RotateCcw size={16} aria-hidden="true" className="text-peacock-700" /> Restore samples
           </button>
         </div>

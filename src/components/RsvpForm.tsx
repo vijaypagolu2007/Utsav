@@ -84,7 +84,7 @@ export default function RsvpForm({ functions, askKids, maxParty = 20, initial, b
               className="grid h-11 w-11 place-items-center rounded-lg border border-line-strong bg-surface text-ink hover:bg-surface-muted disabled:opacity-50"><Minus size={18} aria-hidden="true" /><span className="sr-only">One fewer person</span></button>
             <input id={`${id}-party`} type="number" inputMode="numeric" min={1} max={maxParty} value={v.partySize} data-testid="rsvp-party"
               onChange={e => set({ partySize: clampParty(Number(e.target.value)) })} aria-describedby={`${id}-party-hint`}
-              className="h-11 w-20 rounded-lg border border-line-strong bg-surface px-2 text-center text-base tabular-nums text-ink" />
+              className="h-11 w-20 rounded-lg border border-line-strong bg-surface px-3 text-center text-base tabular-nums text-ink" />
             <button type="button" onClick={() => set({ partySize: clampParty(v.partySize + 1) })} disabled={v.partySize >= maxParty} data-testid="rsvp-party-plus"
               className="grid h-11 w-11 place-items-center rounded-lg border border-line-strong bg-surface text-ink hover:bg-surface-muted disabled:opacity-50"><Plus size={18} aria-hidden="true" /><span className="sr-only">One more person</span></button>
           </div>
@@ -95,7 +95,7 @@ export default function RsvpForm({ functions, askKids, maxParty = 20, initial, b
             <input type="number" inputMode="numeric" min={0} max={v.partySize} value={v.kids ?? 0} data-testid="rsvp-kids"
               onChange={e => set({ kids: Math.max(0, Math.min(maxParty, Math.round(Number(e.target.value) || 0))) })}
               aria-invalid={field === "kids" ? true : undefined} aria-describedby={described("kids")}
-              className="mt-1 block h-11 w-20 rounded-lg border border-line-strong bg-surface px-2 text-center text-base tabular-nums text-ink" />
+              className="mt-1 block h-11 w-20 rounded-lg border border-line-strong bg-surface px-3 text-center text-base tabular-nums text-ink" />
           </label>
         )}
       </div>

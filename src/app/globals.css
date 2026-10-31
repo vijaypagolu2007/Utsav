@@ -1,7 +1,21 @@
 @import "tailwindcss";
+/* Inter and Playfair Display (SIL OFL 1.1), latin + latin-ext variable subsets from Google Fonts, vendored. */
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 400 700; font-display: swap; src: url("./fonts/inter-latin-ext.woff2") format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 400 700; font-display: swap; src: url("./fonts/inter-latin.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Playfair Display"; font-style: normal; font-weight: 600 700; font-display: swap; src: url("./fonts/playfair-display-latin-ext.woff2") format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Playfair Display"; font-style: normal; font-weight: 600 700; font-display: swap; src: url("./fonts/playfair-display-latin.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
 
 @theme {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+  /* ui-ux-pro-max "Classic Elegant" pairing (self-hosted woff2 in src/app/fonts, display swap; no next/font/google, whose Turbopack dev resolver failed on Windows): Inter for body
+     and UI, Playfair Display for headings (h1, h2 and the card and dialog titles). System faces stay as the fallbacks. */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+  --font-display: "Playfair Display", Georgia, "Times New Roman", serif;
+  /* Soft UI shadows: lower, wider and tinted with the warm maroon ink instead of flat black, so cards float gently. */
+  /* v8 Part 3c: one notch quieter (Soft UI Evolution "0 2px 4px" blend), so a card reads as a sheet, not a floating tile. */
+  --shadow-sm: 0 1px 2px 0 rgb(74 22 44 / 0.04), 0 1px 1px 0 rgb(74 22 44 / 0.03);
+  --shadow: 0 1px 2px -1px rgb(74 22 44 / 0.05), 0 3px 8px -2px rgb(74 22 44 / 0.06);
+  --shadow-lg: 0 4px 8px -4px rgb(74 22 44 / 0.07), 0 12px 24px -6px rgb(74 22 44 / 0.09);
+  --shadow-xl: 0 8px 16px -6px rgb(74 22 44 / 0.09), 0 24px 44px -12px rgb(74 22 44 / 0.14);
 }
 
 /*
@@ -102,9 +116,16 @@
  * Dark theme (Light / Dark / System toggle; the inline script in layout.tsx sets data-theme on <html> before first
  * paint). The design tokens above, and the palette shades components name directly, are re-pointed here: each one
  * takes the value of its mirror shade (light surfaces become dark ones, dark text becomes light text, and a solid
- * colour with white text becomes a light colour with dark text), so every pair keeps its contrast. The ground is a
- * deep aubergine (white = the card surface, sand-50 = the page) with ivory text, and the brand scale turns saffron-gold
- * so the primary stays luminous and clearly apart from danger red; maroon and peacock become their light tints.
+ * colour with white text becomes a light colour with dark text), so every pair keeps its contrast.
+ * v8 Part 3b redesign (ui-ux-pro-max "Premium dark + gold accent", colors.csv E-commerce Luxury: stone #0C0A09 /
+ * #1C1917 / #44403C with gold #A16207 / #CA8A04, plus the dark-mode rules: no pure black ground, no pure white text,
+ * elevation by lighter surfaces, desaturated accents). Grounds and surfaces are warm stone / charcoal only (oklch hue
+ * 66-70, chroma 0.005-0.012, no purple or plum anywhere): ground sand-50 #141210, cards white #1C1A17, raised and hover
+ * sand-100 #26231F, lines sand-200 #3A3631, line-strong sand-500 #8E8882. Text is warm ivory (sand-900 #F3EDE5) with
+ * muted sand-600 #B6B0A9. Utsav's pink stays as a muted rose primary (brand-700 #F08BAE, hover brand-800 #FAA9C1, soft
+ * brand-50 #351C20); maroon becomes champagne gold (secondary maroon-800 #DFCA99); marigold is the gold accent
+ * (marigold-400 #D4A64A) for rules and glows, never small text; danger is a coral red (red-700 #FF8C72, hue 30-34) kept
+ * clearly apart from the rose (hue 358-8). Peacock, emerald and amber keep their readable dark mirrors.
  * src/tests/a11y.test.ts reads this block and checks every text (4.5:1) and UI (3:1) pair in both themes.
  * Values are literal (the status scales name their source shade) because a var() pointing at a shade that is itself
  * remapped on the same element would be a cycle. Screen only: printing always uses the light theme.
@@ -112,40 +133,40 @@
 @media screen {
   :root[data-theme="dark"] {
     color-scheme: dark;
-    --color-white: oklch(21.8% 0.024 345); /* card surface */
-    --color-sand-50: oklch(16.2% 0.02 345);
-    --color-sand-100: oklch(27% 0.026 345);
-    --color-sand-200: oklch(34% 0.026 345);
-    --color-sand-300: oklch(41% 0.024 345);
-    --color-sand-400: oklch(52% 0.022 340);
-    --color-sand-500: oklch(66% 0.02 40);
-    --color-sand-600: oklch(80.5% 0.018 60);
-    --color-sand-700: oklch(87.5% 0.014 66);
-    --color-sand-800: oklch(93% 0.011 72);
-    --color-sand-900: oklch(96.6% 0.008 78);
-    --color-sand-950: oklch(98.2% 0.006 82);
-    --color-brand-50: oklch(26% 0.05 48);
-    --color-brand-100: oklch(32% 0.068 50);
-    --color-brand-200: oklch(38.5% 0.088 52);
-    --color-brand-300: oklch(46.5% 0.11 55);
-    --color-brand-400: oklch(56% 0.13 58);
-    --color-brand-500: oklch(66% 0.145 62);
-    --color-brand-600: oklch(74.5% 0.148 66);
-    --color-brand-700: oklch(82% 0.135 72);
-    --color-brand-800: oklch(88% 0.105 78);
-    --color-brand-900: oklch(93% 0.065 83);
-    --color-brand-950: oklch(96.5% 0.032 86);
-    --color-maroon-50: oklch(24.5% 0.05 350);
-    --color-maroon-100: oklch(30.5% 0.066 350);
-    --color-maroon-200: oklch(37% 0.08 351);
-    --color-maroon-300: oklch(45% 0.095 352);
-    --color-maroon-400: oklch(55% 0.105 353);
-    --color-maroon-500: oklch(65% 0.1 354);
-    --color-maroon-600: oklch(73.5% 0.085 354);
-    --color-maroon-700: oklch(81% 0.068 354);
-    --color-maroon-800: oklch(87.5% 0.048 352);
-    --color-maroon-900: oklch(92.5% 0.03 350);
-    --color-maroon-950: oklch(96.5% 0.014 350);
+    --color-white: oklch(21.9% 0.0065 68); /* card surface (#1C1A17-ish): one step above the ground */
+    --color-sand-50: oklch(18.4% 0.0052 66); /* #141210 ground */
+    --color-sand-100: oklch(25.8% 0.0085 68); /* #26231F raised / hover */
+    --color-sand-200: oklch(33.5% 0.01 68); /* #3A3631 line */
+    --color-sand-300: oklch(41% 0.011 66);
+    --color-sand-400: oklch(52% 0.011 66);
+    --color-sand-500: oklch(63% 0.011 66); /* #8E8882 line-strong */
+    --color-sand-600: oklch(76% 0.012 70); /* #B6B0A9 muted text */
+    --color-sand-700: oklch(84% 0.012 70);
+    --color-sand-800: oklch(90% 0.012 70);
+    --color-sand-900: oklch(94.8% 0.012 70); /* #F3EDE5 ink: warm ivory */
+    --color-sand-950: oklch(97.5% 0.008 70);
+    --color-brand-50: oklch(26% 0.04 8); /* #351C20 primary-soft: a dusky rose wash, warm (no plum) */
+    --color-brand-100: oklch(31% 0.055 6);
+    --color-brand-200: oklch(38% 0.075 4);
+    --color-brand-300: oklch(46% 0.095 2);
+    --color-brand-400: oklch(56% 0.115 0);
+    --color-brand-500: oklch(65% 0.125 359);
+    --color-brand-600: oklch(70.5% 0.13 358.5);
+    --color-brand-700: oklch(75.4% 0.1285 358.5); /* #F08BAE primary: muted rose */
+    --color-brand-800: oklch(82% 0.1 0); /* #FAA9C1 primary hover */
+    --color-brand-900: oklch(89% 0.06 2);
+    --color-brand-950: oklch(95% 0.028 4);
+    --color-maroon-50: oklch(25.5% 0.028 80); /* #2A2113 secondary-soft: a champagne wash */
+    --color-maroon-100: oklch(30.5% 0.038 80);
+    --color-maroon-200: oklch(37.5% 0.05 81);
+    --color-maroon-300: oklch(45.5% 0.062 82);
+    --color-maroon-400: oklch(55% 0.072 83);
+    --color-maroon-500: oklch(64% 0.08 84);
+    --color-maroon-600: oklch(71% 0.082 85);
+    --color-maroon-700: oklch(77.5% 0.08 86);
+    --color-maroon-800: oklch(84.5% 0.068 87); /* #DFCA99 secondary: champagne gold */
+    --color-maroon-900: oklch(90.5% 0.045 88);
+    --color-maroon-950: oklch(95.5% 0.022 90);
     --color-peacock-50: oklch(25% 0.04 214);
     --color-peacock-100: oklch(31% 0.055 212);
     --color-peacock-200: oklch(37.5% 0.068 210);
@@ -157,17 +178,17 @@
     --color-peacock-800: oklch(88% 0.058 197);
     --color-peacock-900: oklch(93% 0.034 196);
     --color-peacock-950: oklch(96.5% 0.016 196);
-    --color-marigold-50: oklch(26.5% 0.055 55);
-    --color-marigold-100: oklch(33% 0.075 58);
-    --color-marigold-200: oklch(40% 0.095 62);
-    --color-marigold-300: oklch(86.4% 0.142 79);
-    --color-marigold-400: oklch(80.6% 0.163 71);
-    --color-marigold-500: oklch(55.5% 0.15 50);
-    --color-marigold-600: oklch(66% 0.16 48);
-    --color-marigold-700: oklch(71% 0.165 42);
-    --color-marigold-800: oklch(82% 0.12 60);
-    --color-marigold-900: oklch(92.5% 0.075 85);
-    --color-marigold-950: oklch(96.5% 0.035 90);
+    --color-marigold-50: oklch(26% 0.035 78);
+    --color-marigold-100: oklch(30.5% 0.048 78);
+    --color-marigold-200: oklch(38% 0.065 80);
+    --color-marigold-300: oklch(82% 0.11 82);
+    --color-marigold-400: oklch(75% 0.1215 82); /* #D4A64A gold accent (#D4A64A) */
+    --color-marigold-500: oklch(58% 0.11 74);
+    --color-marigold-600: oklch(66% 0.12 74);
+    --color-marigold-700: oklch(77% 0.12 80);
+    --color-marigold-800: oklch(85% 0.095 84);
+    --color-marigold-900: oklch(92% 0.06 88);
+    --color-marigold-950: oklch(96.5% 0.03 90);
     --color-emerald-50: oklch(26.2% 0.051 172.552); /* emerald-950 */
     --color-emerald-100: oklch(37.8% 0.077 168.94); /* emerald-900 */
     --color-emerald-200: oklch(43.2% 0.095 166.913); /* emerald-800 */
@@ -175,7 +196,7 @@
     --color-emerald-400: oklch(59.6% 0.145 163.225); /* emerald-600 */
     --color-emerald-500: oklch(69.6% 0.17 162.48); /* emerald-500 */
     --color-emerald-600: oklch(72% 0.13 165); /* softened emerald-400 */
-    --color-emerald-700: oklch(79% 0.12 166); /* softened emerald-300: less neon on the aubergine ground */
+    --color-emerald-700: oklch(79% 0.12 166); /* softened emerald-300: less neon on the charcoal ground */
     --color-emerald-800: oklch(90.5% 0.093 164.15); /* emerald-200 */
     --color-emerald-900: oklch(95% 0.052 163.051); /* emerald-100 */
     --color-emerald-950: oklch(97.9% 0.021 166.113); /* emerald-50 */
@@ -190,20 +211,37 @@
     --color-amber-800: oklch(92.4% 0.12 95.746); /* amber-200 */
     --color-amber-900: oklch(96.2% 0.059 95.617); /* amber-100 */
     --color-amber-950: oklch(98.7% 0.022 95.277); /* amber-50 */
-    --color-red-50: oklch(25.8% 0.092 26.042); /* red-950 */
-    --color-red-100: oklch(39.6% 0.141 25.723); /* red-900 */
-    --color-red-200: oklch(44.4% 0.177 26.899); /* red-800 */
-    --color-red-300: oklch(50.5% 0.213 27.518); /* red-700 */
-    --color-red-400: oklch(57.7% 0.245 27.325); /* red-600 */
-    --color-red-500: oklch(63.7% 0.237 25.331); /* red-500 */
-    --color-red-600: oklch(70.4% 0.191 22.216); /* red-400 */
-    --color-red-700: oklch(80.8% 0.114 19.571); /* red-300 */
-    --color-red-800: oklch(88.5% 0.062 18.334); /* red-200 */
-    --color-red-900: oklch(93.6% 0.032 17.717); /* red-100 */
-    --color-red-950: oklch(97.1% 0.013 17.38); /* red-50 */
+    --color-red-50: oklch(25.5% 0.07 30); /* #3E120D danger-soft */
+    --color-red-100: oklch(33% 0.1 30);
+    --color-red-200: oklch(41% 0.13 30);
+    --color-red-300: oklch(50% 0.165 30);
+    --color-red-400: oklch(58% 0.19 30);
+    --color-red-500: oklch(64% 0.19 31);
+    --color-red-600: oklch(70% 0.17 32);
+    --color-red-700: oklch(76% 0.145 34); /* #FF8C72 danger: coral red (hue 34, well apart from the rose at 358) */
+    --color-red-800: oklch(85% 0.09 32);
+    --color-red-900: oklch(92% 0.05 30);
+    --color-red-950: oklch(96.5% 0.02 28);
+    /* Elevation on a charcoal ground: black drop shadows (a warm tint vanishes here) under a faint warm top highlight. */
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.45), 0 1px 3px 0 rgb(0 0 0 / 0.3);
+    --shadow: 0 2px 4px -1px rgb(0 0 0 / 0.5), 0 4px 10px -2px rgb(0 0 0 / 0.38);
+    --shadow-lg: 0 6px 12px -4px rgb(0 0 0 / 0.55), 0 14px 28px -6px rgb(0 0 0 / 0.48);
+    --shadow-xl: 0 10px 20px -6px rgb(0 0 0 / 0.6), 0 24px 44px -10px rgb(0 0 0 / 0.58);
+    --shadow-highlight: inset 0 1px 0 0 rgb(255 244 228 / 0.055);
   }
-  :root[data-theme="dark"] dialog::backdrop { background-color: rgb(12 4 9 / 0.65); }
-  :root[data-theme="dark"] .festive-rule::after { background-image: linear-gradient(90deg, oklch(80.6% 0.163 71), oklch(74.4% 0.172 62) 30%, oklch(62.5% 0.21 4) 70%, oklch(56.5% 0.13 353)); }
+  /* Dialog backdrop: stone #0C0A09 at 76%, so the page recedes into charcoal rather than a coloured veil. */
+  :root[data-theme="dark"] dialog::backdrop { background-color: rgb(12 10 9 / 0.76); backdrop-filter: blur(2px); }
+  /* The header thread in dark: a gold zari line with the rose at its centre, gold again at the far end. */
+  :root[data-theme="dark"] .festive-rule::after { background-image: linear-gradient(90deg, oklch(75% 0.1215 82), oklch(75.4% 0.1285 358.5) 55%, oklch(84.5% 0.068 87)); }
+  /* Tailwind inlines the @theme shadows into the utilities, so the dark shadows are applied to them here too. */
+  :root[data-theme="dark"] .shadow-sm { --tw-shadow: var(--shadow-highlight), var(--shadow-sm); }
+  :root[data-theme="dark"] .shadow { --tw-shadow: var(--shadow-highlight), var(--shadow); }
+  :root[data-theme="dark"] .shadow-lg { --tw-shadow: var(--shadow-highlight), var(--shadow-lg); }
+  :root[data-theme="dark"] .shadow-xl, :root[data-theme="dark"] .shadow-2xl { --tw-shadow: var(--shadow-highlight), var(--shadow-xl); }
+  /* Overview hero: the glows stay low (their tints are checked under the heading text); a thin gold top edge over the warm highlight. */
+  :root[data-theme="dark"] .festive-hero { box-shadow: inset 0 1px 0 0 oklch(75% 0.1215 82 / 0.35), var(--shadow-highlight); }
+  /* Guest banner: the silk keeps its light-theme colours (white text 5.2:1 or better); a deeper drop shadow and a thin top sheen lift it off the ink ground. */
+  :root[data-theme="dark"] .hero-silk { box-shadow: inset 0 -3px 0 oklch(80.6% 0.163 71), inset 0 1px 0 rgb(255 255 255 / 0.1), 0 14px 30px -10px rgb(0 0 0 / 0.65), 0 4px 8px -4px rgb(0 0 0 / 0.5); }
 }
 
 /* Mobile bottom tab bar height (excluding the safe-area inset). Main content, toasts and scroll padding all reserve it.
@@ -211,6 +249,30 @@
 :root { --tabbar-h: 4rem; --header-h: 4.25rem; --fab-space: 5.5rem; }
 
 body { line-height: 1.5; }
+
+/*
+ * Headings in Playfair Display: the page h1 and every h2 (Card / section titles and the dialog titles). In the base layer,
+ * so a component's own weight (font-semibold 600, font-bold 700) still applies. Playfair runs wide and tall, so it gets
+ * a hair of negative tracking and a slightly tighter line; figures inside a heading (a count) stay in Inter's tabular digits.
+ */
+@layer base {
+  h1, h2 { font-family: var(--font-display); letter-spacing: -0.01em; font-optical-sizing: auto; text-wrap: balance; }
+  h1 { line-height: 1.2; }
+  /* Sub-section headings stay in Inter: Playfair is kept for the page title and the panel titles only. */
+  h3 { text-wrap: balance; }
+  :where(h1, h2) .tabular-nums { font-family: var(--font-sans); letter-spacing: normal; }
+}
+
+/*
+ * Interaction polish, ui-ux-pro-max Soft UI Evolution (Tailwind v4 dropped the pointer cursor on buttons): every enabled
+ * control shows a pointer, and colour, border, outline, opacity and shadow changes ease over 200ms instead of snapping.
+ * The prefers-reduced-motion rule below (every element, !important) cuts it to 0.01ms.
+ */
+:where(button, [role="button"], [role="tab"], [role="menuitem"], [role="option"], select, summary, label[for], a[href]):where(:not(:disabled, [aria-disabled="true"])) { cursor: pointer; }
+:where(button, a[href], [role="button"], [role="tab"], [role="menuitem"], select, input, textarea, summary) {
+  transition-property: color, background-color, border-color, outline-color, box-shadow, text-decoration-color, opacity;
+  transition-duration: 200ms; transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
 
 /* 3-second emerald pulse on anything the last change touched. Two identical keyframes let a new change restart it. */
 /* The tint follows the theme (emerald-100 in light, its dark mirror in dark) so text stays readable while it pulses. */
@@ -265,14 +327,16 @@ body { line-height: 1.5; }
   box-shadow: inset 0 -3px 0 oklch(80.6% 0.163 71), 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
 }
 /*
- * Overview hero: the card surface warmed by two soft glows. --hero-a / --hero-b are pale tints, so the heading text
- * on them keeps its contrast (checked in a11y.test.ts at the tint itself, the worst point). The event type picks the
- * second glow: wedding maroon, birthday kumkum, community peacock.
+ * Overview hero: the card surface with one quiet wash of colour in its top-right corner (v8 Part 3c: the second,
+ * top-left glow is gone, so the title sits on a calm surface). --hero-a / --hero-b are pale tints, so any text on them
+ * keeps its contrast (checked in a11y.test.ts at the tint itself, the worst point). The event type picks the wash:
+ * wedding maroon, birthday kumkum, community peacock; --hero-a (marigold) is a faint warm floor along the top edge.
  */
 .festive-hero {
   --hero-a: var(--color-marigold-100); --hero-b: var(--color-brand-50);
   background-color: var(--color-surface);
-  background-image: radial-gradient(ellipse 60% 120% at 0% 0%, var(--hero-a), transparent 70%), radial-gradient(ellipse 55% 110% at 100% 0%, var(--hero-b), transparent 70%);
+  background-image: radial-gradient(ellipse 45% 95% at 100% 0%, var(--hero-b), transparent 72%),
+    linear-gradient(180deg, color-mix(in srgb, var(--hero-a) 35%, transparent), transparent 40%);
   border-bottom: 1px solid var(--color-line);
 }
 /* Below 640px the hero bleeds edge to edge (it keeps the page's full content width); from 640px it is a framed panel. */
@@ -282,7 +346,7 @@ body { line-height: 1.5; }
 .festive-hero[data-event-type="community"] { --hero-b: var(--color-peacock-50); }
 
 /* ---------- accessibility ---------- */
-/* One visible, high-contrast focus ring for every control: kumkum (7.1:1 on white) in light, saffron-gold in dark. Keyboard focus only. */
+/* One visible, high-contrast focus ring for every control: kumkum (7.1:1 on white) in light, luminous rose in dark. Keyboard focus only. */
 :where(a, button, input, select, textarea, summary, dialog, [tabindex]):focus-visible { outline: 2px solid var(--color-brand-700); outline-offset: 2px; }
 /* Placeholders at body-copy contrast (Tailwind's default is a 50% tint of the text colour). */
 ::placeholder { color: var(--color-sand-600); opacity: 1; }

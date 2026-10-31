@@ -42,11 +42,11 @@ export type PlannerState = {
   aiMode: "gemini" | "offline" | null;
   forceOffline: boolean;
   /**
-   * The Overview's event-name row. v8 Part 0d: "Delete event" for every event (requestDelete opens the confirm dialog);
-   * isSample adds "Reset sample" (the existing Reset) next to it. noEvents: every event is deleted, so the setup form
-   * offers restoreSamples ("Restore samples") as well as a new event.
+   * The Overview hero's "Delete event" for every event, samples included (requestDelete opens the confirm dialog). A
+   * sample is reset from the More menu's Reset (v8 Part 3b dropped the Overview's own "Reset sample"). noEvents: every
+   * event is deleted, so the setup form offers restoreSamples ("Restore samples") as well as a new event.
    */
-  eventActions: { isSample: boolean; requestDelete: () => void; resetSample: () => void; noEvents: boolean; restoreSamples: () => void };
+  eventActions: { requestDelete: () => void; noEvents: boolean; restoreSamples: () => void };
   /**
    * v8 Part 1: the shared guest links, for the Guests page. share is null until the organizer publishes. resetInvite and
    * setJoinLink resolve to an error message, or null when the server did it.

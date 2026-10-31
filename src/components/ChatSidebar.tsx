@@ -41,10 +41,10 @@ export function DiffCard({ a, onApprove, onReject }: { a: Extract<UIAction, { ki
   // v8 Part 0c: a delete_event card (always Tier 2). Approve opens the app's own confirm; nothing is deleted before that.
   const isDelete = a.batch.commands.some(c => c.op === "delete_event");
   return (
-    <div data-testid={a.counterOffer ? "counter-offer-card" : "diff-card"} data-op={isDelete ? "delete_event" : undefined} className={`rounded-xl border ${a.tier === 0 ? "border-emerald-200 bg-emerald-50/40" : "border-amber-200 bg-amber-50/40"} p-3`}>
+    <div data-testid={a.counterOffer ? "counter-offer-card" : "diff-card"} data-op={isDelete ? "delete_event" : undefined} className={`rounded-lg border ${a.tier === 0 ? "border-emerald-200 bg-emerald-50/40" : "border-amber-200 bg-amber-50/40"} p-3`}>
       <div className="flex items-center gap-2">
         {a.tier === 0 ? <ShieldCheck size={14} className="text-emerald-600" /> : <ShieldAlert size={14} className="text-amber-600" />}
-        <span className="text-xs font-semibold uppercase tracking-wide text-sand-600">Tier {a.tier} · {a.counterOffer ? "Counter-offer" : isDelete ? "Delete event: needs your approval" : TIER_LABEL[a.tier]}</span>
+        <span className="text-xs font-semibold text-sand-600">Tier {a.tier} · {a.counterOffer ? "Counter-offer" : isDelete ? "Delete event: needs your approval" : TIER_LABEL[a.tier]}</span>
         <span className="ml-auto"><StatusPill a={a} /></span>
       </div>
       <div className="mt-1 text-sm font-medium text-sand-800">{a.batch.summary}</div>
@@ -89,8 +89,8 @@ function RejectionCard({ a }: { a: Extract<UIAction, { kind: "rejection" }> }) {
   const d = a.rejection.diagnostics;
   const cut = Object.entries(d.categoryMaxCuttablePaise).filter(([, v]) => v > 0).sort((x, y) => y[1] - x[1]).slice(0, 6);
   return (
-    <div data-testid="rejection-card" className="rounded-xl border border-red-200 bg-red-50/50 p-3">
-      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-red-700"><AlertOctagon size={14} /> Rolled back · command #{a.rejection.failedCommandIndex + 1}</div>
+    <div data-testid="rejection-card" className="rounded-lg border border-red-200 bg-red-50/50 p-3">
+      <div className="flex items-center gap-2 text-xs font-semibold text-red-700"><AlertOctagon size={14} /> Rolled back · command #{a.rejection.failedCommandIndex + 1}</div>
       <div className="mt-1 text-sm text-sand-800">{a.rejection.reason}</div>
       {d.validDatesForSubEvent && (
         <div className="mt-2">
@@ -116,8 +116,8 @@ function DraftCard({ a }: { a: Extract<UIAction, { kind: "draft" }> }) {
     ? `mailto:?subject=${encodeURIComponent(a.draft.subject ?? "")}&body=${encodeURIComponent(body)}`
     : `https://wa.me/?text=${encodeURIComponent(body)}`;
   return (
-    <div className="rounded-xl border border-brand-200 bg-brand-50/40 p-3">
-      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-brand-700">
+    <div className="rounded-lg border border-brand-200 bg-brand-50/40 p-3">
+      <div className="flex items-center gap-2 text-xs font-semibold text-brand-700">
         {isMail ? <Mail size={14} /> : <MessageCircle size={14} />} Tier 2 · {TIER_LABEL[2]}
       </div>
       <div className="mt-1 text-xs text-sand-700">To <b>{a.draft.recipient}</b>{a.draft.subject && <> · <i>{a.draft.subject}</i></>}</div>
@@ -139,8 +139,8 @@ export function QuestionsCard({ need, questions, source }: { need: string; quest
   const [copied, setCopied] = useState(false);
   const text = `Questions for the ${need.toLowerCase()}:\n${questions.map((q, i) => `${i + 1}. ${q}`).join("\n")}`;
   return (
-    <div data-testid="questions-card" className="rounded-xl border border-peacock-200 bg-peacock-50 p-3">
-      <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-peacock-700">
+    <div data-testid="questions-card" className="rounded-lg border border-peacock-200 bg-peacock-50 p-3">
+      <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-peacock-700">
         <ListChecks size={14} aria-hidden="true" /> Questions to ask: {need}<span className="ml-auto normal-case">{source === "gemini" ? "Live AI" : "Demo bank"}</span>
       </div>
       <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-sand-800">{questions.map(q => <li key={q}>{q}</li>)}</ol>
@@ -158,7 +158,7 @@ function ActionView({ a, msgId, onApprove, onReject }: { a: UIAction; msgId: str
     case "rejection": return <RejectionCard a={a} />;
     case "draft": return <DraftCard a={a} />;
     case "insights": return (
-      <div className="rounded-xl border border-sand-200 bg-white p-2">
+      <div className="rounded-lg border border-sand-200 bg-white p-3">
         {a.insights.slice(0, 8).map(i => (
           <div key={i.id} className="flex items-start gap-2 p-1"><Badge tone={severityTone(i.severity)}>{i.severity}</Badge>
             <span className="min-w-0 text-sm"><b className="font-medium text-sand-800">{i.title}</b> <span className="text-sand-600">· {i.detail}</span></span></div>
@@ -167,8 +167,8 @@ function ActionView({ a, msgId, onApprove, onReject }: { a: UIAction; msgId: str
       </div>
     );
     case "init": return (
-      <div className="rounded-xl border border-maroon-200 bg-maroon-50/50 p-3">
-        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-maroon-700"><Wand2 size={14} /> Cold-start blueprint<span className="ml-auto"><StatusPill a={a} /></span></div>
+      <div className="rounded-lg border border-maroon-200 bg-maroon-50/50 p-3">
+        <div className="flex items-center gap-2 text-xs font-semibold text-maroon-700"><Wand2 size={14} /> Cold-start blueprint<span className="ml-auto"><StatusPill a={a} /></span></div>
         <div className="mt-1 text-xs font-semibold text-sand-800">{a.plan.event.title}</div>
         <div className="text-xs text-sand-600">{a.plan.event.eventType} · {a.plan.event.city} · {a.plan.event.startDate}{a.plan.event.endDate !== a.plan.event.startDate ? ` → ${a.plan.event.endDate}` : ""} · {inr(a.plan.event.totalBudgetPaise)}</div>
         <div className="mt-2 flex flex-wrap gap-1">{a.plan.subEvents.map(s => <Badge key={s.id} tone={s.isMain ? "primary" : "neutral"}>{s.name} · {s.date.slice(5)}</Badge>)}</div>
@@ -180,10 +180,10 @@ function ActionView({ a, msgId, onApprove, onReject }: { a: UIAction; msgId: str
       </div>
     );
     case "questions": return <QuestionsCard need={a.label} questions={a.questions} source={a.source} />;
-    case "init_rejection": return <div className="rounded-xl border border-red-200 bg-red-50 p-2 text-xs text-red-700">{a.reason}</div>;
+    case "init_rejection": return <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{a.reason}</div>;
     case "ideas": return (
-      <div data-testid="ideas-card" className="rounded-xl border border-marigold-300 bg-marigold-50 p-3">
-        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-marigold-800">
+      <div data-testid="ideas-card" className="rounded-lg border border-marigold-300 bg-marigold-50 p-3">
+        <div className="flex items-center gap-2 text-xs font-semibold text-marigold-800">
           <Lightbulb size={14} aria-hidden="true" /> {a.ideas.length} idea{a.ideas.length === 1 ? "" : "s"} · {a.source === "gemini" ? "Live AI" : "Demo"}<span className="ml-auto"><StatusPill a={a} /></span>
         </div>
         <ul className="mt-2 space-y-1">
@@ -215,27 +215,27 @@ export default function ChatSidebar({ messages, busy, onSend, onApprove, onRejec
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
-      <header className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-sand-200 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))]">
-        <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white ${guest ? "bg-brand-700" : "bg-maroon-800"}`}>{guest ? <Ticket size={16} /> : <Bot size={16} />}</div>
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-sand-200 px-5 pb-3 pt-[calc(1rem+env(safe-area-inset-top))]">
+        <div aria-hidden="true" className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg text-white ${guest ? "bg-brand-700" : "bg-maroon-800"}`}>{guest ? <Ticket size={16} /> : <Bot size={16} />}</div>
         <div className="min-w-0 flex-1 leading-tight">
-          <h2 id={titleId} className="text-base font-semibold">{title}</h2>
+          <h2 id={titleId} className="text-lg font-semibold leading-snug">{title}</h2>
           <p className="text-sm text-sand-600">{guest ? `Read-only + RSVP assistant${actingEntryName ? ` · you are ${actingEntryName}` : ""}` : "Gemini proposes · reducer computes · you approve"}</p>
         </div>
         <button type="button" onClick={onClose} data-drawer-close aria-label={`Close ${title}`} title={`Close ${title} (Esc)`}
-          className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-sand-700 hover:bg-sand-100 hover:text-sand-900"><X size={20} aria-hidden="true" /></button>
+          className="-mr-2 grid h-11 w-11 shrink-0 place-items-center rounded-lg text-sand-700 hover:bg-sand-100 hover:text-sand-900"><X size={20} aria-hidden="true" /></button>
         <div className="flex w-full items-center gap-2">
           <label className="flex min-h-9 cursor-pointer items-center gap-2 text-sm text-sand-700" title="Force the deterministic offline parser (for flaky Wi-Fi)">
             <input type="checkbox" checked={forceOffline} onChange={e => setForceOffline(e.target.checked)} className="h-6 w-6 shrink-0 accent-sand-800" />
-            <WifiOff size={12} /> Demo mode (offline)
+            <WifiOff size={14} aria-hidden="true" /> Demo mode (offline)
           </label>
           {mode && <span className="ml-auto" data-testid="ai-mode"><Badge tone={mode === "gemini" ? "success" : "neutral"}>{mode === "gemini" ? "Gemini" : "Offline"}</Badge></span>}
         </div>
       </header>
 
-      <div role="log" aria-label={`${title} conversation`} className="scroll-thin min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-3">
+      <div role="log" aria-label={`${title} conversation`} className="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-5 py-4">
         {messages.map(m => (
           <div key={m.id} className={m.role === "user" ? "flex justify-end" : ""}>
-            <div className={m.role === "user" ? "max-w-[85%] break-words rounded-2xl rounded-br-md bg-maroon-800 px-3 py-2 text-sm text-white" : "space-y-2"}>
+            <div className={m.role === "user" ? "max-w-[85%] break-words rounded-xl rounded-br-sm bg-maroon-800 px-3 py-2 text-sm leading-relaxed text-white" : "space-y-2"}>
               {m.role === "assistant" ? (
                 <>
                   <div className="flex gap-2">
@@ -255,7 +255,7 @@ export default function ChatSidebar({ messages, busy, onSend, onApprove, onRejec
       <p role="status" className="sr-only" data-testid="copilot-status">{announcement}</p>
       {/* The highlight only shows on the page behind the drawer: link to the other pages the change touched. */}
       {elsewhere.length > 0 && (
-        <div data-testid="copilot-elsewhere" className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-sand-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-900">
+        <div data-testid="copilot-elsewhere" className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-sand-200 bg-emerald-50 px-5 py-2 text-sm text-emerald-900">
           <span className="font-medium">Also changed on</span>
           {elsewhere.map(l => (
             <Link key={l.href} href={l.href} onClick={onClose}
@@ -266,11 +266,11 @@ export default function ChatSidebar({ messages, busy, onSend, onApprove, onRejec
         </div>
       )}
 
-      <div className="border-t border-sand-200 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3">
+      <div className="border-t border-sand-200 px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3">
         <div className="mb-2 flex flex-wrap items-center gap-2">
-          <h3 id={`${titleId}-chips`} className="text-xs font-semibold uppercase tracking-wide text-sand-600">{guest ? "Try as a guest" : "Try asking"}</h3>
+          <h3 id={`${titleId}-chips`} className="text-xs font-semibold text-sand-600">{guest ? "Try as a guest" : "Try asking"}</h3>
           {!guest && (
-            <span className="ml-auto flex gap-1">
+            <span className="ml-auto flex gap-2">
               <button type="button" onClick={() => onScan({ sampleId: sample.id })} disabled={busy} title={sample.title}
                 className="flex min-h-9 items-center gap-1 rounded-full bg-brand-700 px-2.5 py-0.5 text-xs font-semibold text-white hover:bg-brand-800 disabled:opacity-50"><FileText size={12} /> Scan sample quote</button>
               <button type="button" onClick={() => fileRef.current?.click()} disabled={busy} title="Upload a vendor quote (image, PDF or text)"
@@ -280,7 +280,7 @@ export default function ChatSidebar({ messages, busy, onSend, onApprove, onRejec
             </span>
           )}
         </div>
-        <div role="group" aria-labelledby={`${titleId}-chips`} className="scroll-thin mb-2 flex max-h-32 flex-wrap gap-1.5 overflow-y-auto overscroll-contain">
+        <div role="group" aria-labelledby={`${titleId}-chips`} className="scroll-thin mb-3 flex max-h-32 flex-wrap gap-2 overflow-y-auto overscroll-contain">
           {chips.map(c => (
             <button type="button" key={c.id} data-prompt-id={c.id} onClick={() => submit(c.text)} disabled={busy} title={c.hint}
               className="min-h-9 rounded-full border border-sand-400 bg-sand-50 px-3 py-1 text-left text-sm text-sand-800 hover:border-brand-500 hover:bg-brand-50 disabled:opacity-50">{c.text}</button>
@@ -288,8 +288,8 @@ export default function ChatSidebar({ messages, busy, onSend, onApprove, onRejec
         </div>
         <form onSubmit={e => { e.preventDefault(); submit(input); }} className="flex gap-2">
           <input ref={inputRef} aria-label="Chat message" data-drawer-autofocus value={input} onChange={e => setInput(e.target.value)} placeholder={guest ? "Ask about timings, RSVP, claim a gift…" : "Ask, cut, move, plan, draft…"}
-            enterKeyHint="send" autoComplete="off" className="min-h-11 min-w-0 flex-1 rounded-xl border border-sand-500 px-3 py-2 text-base" />
-          <button type="submit" disabled={busy || !input.trim()} aria-label="Send" className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-maroon-800 text-white hover:bg-maroon-900 disabled:opacity-50"><Send size={18} aria-hidden="true" /></button>
+            enterKeyHint="send" autoComplete="off" className="min-h-11 min-w-0 flex-1 rounded-lg border border-sand-500 bg-white px-3 py-2 text-base" />
+          <button type="submit" disabled={busy || !input.trim()} aria-label="Send" className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-maroon-800 text-white hover:bg-maroon-900 disabled:opacity-50"><Send size={18} aria-hidden="true" /></button>
         </form>
       </div>
     </div>

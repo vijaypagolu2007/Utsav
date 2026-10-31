@@ -172,11 +172,11 @@ export default function GuestMicrosite(props: Props) {
   const dte = main ? daysBetween(today, main.date) : null;
   const subs = [...plan.subEvents].sort((a, b) => a.date.localeCompare(b.date) || a.startMin - b.startMin);
   return (
-    <div className="mx-auto max-w-5xl space-y-5">
+    <div className="mx-auto w-full max-w-5xl space-y-6">
       {/* hero-silk (globals.css): deep maroon-to-kumkum silk in both themes, white text at 4.5:1 or better everywhere on it. */}
-      <section className="hero-silk overflow-hidden rounded-3xl p-6 text-white shadow-lg sm:p-8">
-        <p className="text-sm font-semibold uppercase tracking-[0.18em]">{template.guest.kicker}</p>
-        <h1 tabIndex={-1} className="mt-2 break-words text-3xl font-bold leading-tight focus-visible:outline-offset-4 sm:text-4xl">{plan.event.title}</h1>
+      <section className="hero-silk overflow-hidden rounded-2xl p-6 text-white shadow-lg sm:p-8 lg:p-10">
+        <p className="text-sm font-semibold uppercase tracking-wider">{template.guest.kicker}</p>
+        <h1 tabIndex={-1} className="mt-3 break-words text-3xl font-semibold leading-tight focus-visible:outline-offset-4 sm:text-4xl">{plan.event.title}</h1>
         <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-base">
           <span className="flex items-center gap-1.5 tabular-nums"><CalendarHeart size={18} aria-hidden="true" /> {prettyDate(plan.event.startDate)}{plan.event.endDate !== plan.event.startDate ? ` – ${prettyDate(plan.event.endDate)}` : ""}</span>
           <span className="flex items-center gap-1.5"><MapPin size={18} aria-hidden="true" /> {plan.event.city}</span>
@@ -186,7 +186,7 @@ export default function GuestMicrosite(props: Props) {
       </section>
       {summary}
 
-      <div className="grid gap-5 xl:grid-cols-[1fr_24rem]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem] xl:items-start">
         <Card title="Live itinerary" subtitle="Times, venues and dress codes for every part of the celebration." icon={<CalendarHeart size={18} className="text-brand-700" />}>
           <ol className="relative space-y-6 border-l-2 border-marigold-300 pl-6">
             {subs.map(s => {
@@ -198,13 +198,13 @@ export default function GuestMicrosite(props: Props) {
                     <h3 className="text-lg font-semibold text-ink">{s.name}</h3>
                     <Badge tone={phaseTone(s.phase)}>{s.isMain ? "main event" : s.phase === "pre" ? "before" : "after"}</Badge>
                   </div>
-                  <p className="mt-0.5 flex items-center gap-1.5 text-base tabular-nums text-sand-800"><Clock size={16} aria-hidden="true" />{prettyDate(s.date)} · {hhmm(s.startMin)} – {hhmm(s.endMin)}</p>
+                  <p className="mt-1 flex items-center gap-1.5 text-base tabular-nums text-sand-800"><Clock size={16} aria-hidden="true" />{prettyDate(s.date)} · {hhmm(s.startMin)} – {hhmm(s.endMin)}</p>
                   <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink-muted">
                     {s.venue && <span className="flex items-center gap-1"><MapPin size={14} aria-hidden="true" /> {s.venue}</span>}
                     {s.dressCode && <span className="flex items-center gap-1"><Shirt size={14} aria-hidden="true" /> {s.dressCode}</span>}
                   </div>
                   {blocks.length > 0 && (
-                    <ul className="mt-2.5 grid gap-1.5 sm:grid-cols-2">
+                    <ul className="mt-3 grid gap-2 sm:grid-cols-2">
                       {blocks.filter(b => b.lane === "main" || b.anchored).map(b => (
                         <li key={b.id} className="flex items-center gap-2 rounded-lg bg-surface-muted px-3 py-2 text-sm">
                           <span className="w-[4.75rem] shrink-0 whitespace-nowrap font-semibold tabular-nums text-sand-800">{hhmm(b.startMin)}</span>
@@ -219,7 +219,7 @@ export default function GuestMicrosite(props: Props) {
             })}
           </ol>
         </Card>
-        <div className="space-y-5">
+        <div className="space-y-6">
           {renderSections(template.guest.aside, props)}
         </div>
       </div>

@@ -75,7 +75,7 @@ function ScanZone({ plan, onScan, busy }: { plan: AgentState; onScan: (i: ScanIn
   return (
     <div onDragOver={e => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
       onDrop={e => { e.preventDefault(); setDrag(false); take(e.dataTransfer.files[0]); }}
-      className={`mb-5 rounded-xl border-2 border-dashed p-3 transition sm:p-4 ${drag ? "border-brand-600 bg-brand-50" : "border-sand-300 bg-canvas"}`}>
+      className={`mb-6 rounded-xl border-2 border-dashed p-4 transition sm:p-5 ${drag ? "border-brand-600 bg-brand-50" : "border-sand-300 bg-canvas"}`}>
       <div className="flex flex-wrap items-center gap-2">
         {/* A real button opens the file picker, so the action is reachable by keyboard (a <label> around a hidden input is not). */}
         <button type="button" disabled={busy} onClick={() => fileRef.current?.click()}
@@ -107,7 +107,7 @@ function BudgetTotals({ plan, commit }: { plan: AgentState; commit: Commit }) {
   const committed = plan.budgetItems.reduce((a, b) => a + b.committedPaise, 0);
   return (
     <div className="mb-4 space-y-3" data-testid="budget-totals">
-      <dl className="grid gap-2 rounded-xl border border-line bg-surface-muted p-3 text-sm tabular-nums sm:grid-cols-3 sm:p-4">
+      <dl className="grid gap-2 rounded-lg border border-line bg-surface-muted p-4 text-sm tabular-nums sm:grid-cols-3 sm:p-4">
         <div className="min-w-0">
           <dt className="text-ink-muted">Total budget</dt>
           <dd><InlineEdit label="total budget" kind="rupees" value={String(total / 100)} inputSize="w-40" testId="edit-total-budget"
@@ -165,7 +165,7 @@ function AddLineForm({ plan, commit, onAdded }: { plan: AgentState; commit: Comm
     setOpen(false); setLabel(""); setAmount(""); setBooked(false); setError(null); onAdded(cat);
   };
   return (
-    <form noValidate onSubmit={submit} aria-labelledby={`${id}-h`} data-testid="add-line-form" className="rounded-xl border border-line bg-surface-muted p-3 sm:p-4">
+    <form noValidate onSubmit={submit} aria-labelledby={`${id}-h`} data-testid="add-line-form" className="rounded-lg border border-line bg-surface-muted p-4">
       <h3 id={`${id}-h`} className="text-base font-semibold text-ink">Add a budget line</h3>
       <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div><label htmlFor={`${id}-cat`} className="text-sm font-medium text-ink">Category</label>
@@ -346,7 +346,7 @@ export default function BudgetCard({ plan, today, commit, highlight, onScan, bus
         })}
       </div>
       {plan.vendors.length > 0 && (
-        <div className="mt-5 xl:mt-0">
+        <div className="mt-6 xl:mt-0">
           <h3 className="mb-2 flex items-center gap-2 text-base font-semibold text-ink"><Store size={17} aria-hidden="true" className="text-sand-600" /> Vendors</h3>
           <ul className="divide-y divide-line-soft rounded-xl border border-line">
             {plan.vendors.map(v => {

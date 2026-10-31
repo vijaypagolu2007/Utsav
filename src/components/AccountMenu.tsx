@@ -100,7 +100,7 @@ export default function AccountMenu({ cloud, onOpenChoice, onSignOut, onLoadSamp
       </button>
       {open && (
         <div ref={box} id={panelId} data-testid="cloud-panel"
-          className="absolute right-0 z-40 mt-2 w-[min(20rem,calc(100vw-1.5rem))] rounded-xl border border-line bg-surface p-3 shadow-xl max-sm:fixed max-sm:inset-x-3 max-sm:w-auto">
+          className="absolute right-0 z-40 mt-2 w-[min(20rem,calc(100vw-1.5rem))] rounded-xl border border-line bg-surface p-3 shadow-lg max-sm:fixed max-sm:inset-x-3 max-sm:w-auto">
           <p className="break-words text-sm font-semibold text-ink">{user.name}</p>
           {user.email && <p className="break-words text-sm text-ink-muted">{user.email}</p>}
           <p className="mt-2 flex items-start gap-1.5 text-sm text-ink" data-testid="cloud-status-text">
@@ -183,25 +183,25 @@ function ChoiceOpen({ status, localTitle, onUseCloud, onKeepLocal, onClose }: {
       onPointerDown={e => { downOnBackdrop.current = e.target === e.currentTarget; }}
       onClick={e => { if (downOnBackdrop.current && e.target === e.currentTarget) onClose(); downOnBackdrop.current = false; }}
       className="m-auto max-h-[min(85dvh,100%)] w-[calc(100%-2rem)] max-w-lg overflow-hidden rounded-2xl border border-line bg-surface p-0 text-ink shadow-xl backdrop:bg-sand-900/40">
-      <div className="max-h-[min(85dvh,100%)] overflow-y-auto overscroll-contain p-5">
-        <h2 id={titleId} className="text-base font-semibold">Which version should we keep?</h2>
-        <p id={descId} className="mt-1 text-sm text-ink-muted">
+      <div className="max-h-[min(85dvh,100%)] overflow-y-auto overscroll-contain p-5 sm:p-6">
+        <h2 id={titleId} className="text-lg font-semibold leading-snug">Which version should we keep?</h2>
+        <p id={descId} className="mt-2 text-sm leading-relaxed text-ink-muted">
           {conflict ? "This plan was changed on another device since this one last saved it." : "The plan saved in your account is different from the one on this device."}
         </p>
         <ul className="mt-4 grid gap-3 sm:grid-cols-2">
-          <li className="rounded-xl border border-line bg-surface-muted p-3">
+          <li className="rounded-lg border border-line bg-surface-muted p-4">
             <p className="flex items-center gap-1.5 text-sm font-semibold text-ink"><Cloud size={16} aria-hidden="true" className="text-peacock-700" /> Cloud copy</p>
             <p className="mt-1 break-words text-sm text-ink">{status.cloud.plan.event.title}</p>
             <p className="text-xs text-ink-muted">Saved {when(status.cloud.updatedAt)}</p>
           </li>
-          <li className="rounded-xl border border-line bg-surface-muted p-3">
+          <li className="rounded-lg border border-line bg-surface-muted p-4">
             <p className="flex items-center gap-1.5 text-sm font-semibold text-ink"><Laptop size={16} aria-hidden="true" className="text-brand-700" /> This device</p>
             <p className="mt-1 break-words text-sm text-ink">{localTitle}</p>
             <p className="text-xs text-ink-muted">The plan on screen now</p>
           </li>
         </ul>
         <p className="mt-3 text-xs text-ink-muted">Use cloud copy keeps this device&apos;s plan one Undo away. Keep this device&apos;s plan replaces the cloud copy.</p>
-        <div className="mt-4 flex flex-wrap justify-end gap-2">
+        <div className="mt-6 flex flex-wrap justify-end gap-2">
           <button type="button" onClick={onKeepLocal} data-testid="cloud-keep-local"
             className="flex min-h-11 items-center rounded-lg border border-line-strong bg-surface px-4 text-sm font-medium text-sand-800 hover:bg-sand-100">Keep this device&apos;s plan</button>
           <button type="button" onClick={onUseCloud} data-testid="cloud-use-cloud"
