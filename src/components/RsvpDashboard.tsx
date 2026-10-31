@@ -41,7 +41,7 @@ type Counts = ReturnType<typeof computeRsvpCounts>;
 function Tile({ label, value, sub, testId }: { label: string; value: number; sub?: string; testId: string }) {
   return (
     <div className="rounded-xl border border-line bg-surface p-3" data-testid={testId} data-value={value}>
-      <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">{label}</p>
+      <p className="text-xs font-semibold text-ink-muted">{label}</p>
       <p className="mt-1 text-2xl font-bold tabular-nums text-ink">{value}</p>
       {sub && <p className="text-xs text-ink-muted">{sub}</p>}
     </div>
@@ -67,23 +67,23 @@ function PerFunction({ counts }: { counts: Counts }) {
       subtitle="Coming people per function and meal, for the caterer. Maybe is shown on its own and never added to the total.">
       <div tabIndex={0} role="group" aria-label="Headcount by function" className="relative overflow-x-auto focus-visible:outline-offset-2">
         <table className="w-full min-w-[28rem] text-sm" data-testid="rsvp-fn-table">
-          <thead className="text-left text-xs font-semibold uppercase tracking-wide text-ink-muted">
+          <thead className="text-left text-xs font-semibold text-ink-muted">
             <tr>
-              <th scope="col" className="py-1 pr-2">Function</th><th scope="col" className="px-1 py-1 text-right">Coming</th>
-              {kids && <th scope="col" className="px-1 py-1 text-right">Kids</th>}
-              {MEALS.map(m => <th key={m} scope="col" className="px-1 py-1 text-right">{MEAL_LABEL[m]}</th>)}
-              <th scope="col" className="py-1 pl-2 text-right">Maybe</th>
+              <th scope="col" className="pb-2 pr-3">Function</th><th scope="col" className="px-2 pb-2 text-right">Coming</th>
+              {kids && <th scope="col" className="px-2 pb-2 text-right">Kids</th>}
+              {MEALS.map(m => <th key={m} scope="col" className="px-2 pb-2 text-right">{MEAL_LABEL[m]}</th>)}
+              <th scope="col" className="pb-2 pl-3 text-right">Maybe</th>
             </tr>
           </thead>
           <tbody>
             {counts.perFunction.map(f => (
               <tr key={f.id} className="border-t border-line-soft" data-testid={`rsvp-fn-count-${f.id}`} data-coming={f.coming} data-maybe={f.maybe}
                 data-veg={f.meals.veg} data-non-veg={f.meals.non_veg} data-jain={f.meals.jain} {...(kids ? { "data-kids": f.kids ?? 0 } : {})}>
-                <th scope="row" className="py-1.5 pr-2 text-left font-medium text-ink">{f.name}</th>
-                <td className="px-1 py-1.5 text-right font-semibold tabular-nums text-ink">{f.coming}</td>
-                {kids && <td className="px-1 py-1.5 text-right tabular-nums text-ink">{f.kids ?? 0}</td>}
-                {MEALS.map(m => <td key={m} className="px-1 py-1.5 text-right tabular-nums text-ink">{f.meals[m]}</td>)}
-                <td className="py-1.5 pl-2 text-right tabular-nums text-ink-muted">{f.maybe}</td>
+                <th scope="row" className="py-2.5 pr-3 text-left font-medium text-ink">{f.name}</th>
+                <td className="px-2 py-2.5 text-right font-semibold tabular-nums text-ink">{f.coming}</td>
+                {kids && <td className="px-2 py-2.5 text-right tabular-nums text-ink">{f.kids ?? 0}</td>}
+                {MEALS.map(m => <td key={m} className="px-2 py-2.5 text-right tabular-nums text-ink">{f.meals[m]}</td>)}
+                <td className="py-2.5 pl-3 text-right tabular-nums text-ink-muted">{f.maybe}</td>
               </tr>
             ))}
           </tbody>
@@ -164,27 +164,27 @@ function RsvpTable({ plan }: { plan: AgentState }) {
       {live === 0 ? <Empty>No RSVPs yet. Share the RSVP link above: answers appear here.</Empty> : rows.length === 0 ? <Empty>No RSVP matches these filters.</Empty> : (
         <div tabIndex={0} role="group" aria-label="RSVP list" aria-describedby={`${id}-count`} className="relative mt-2 overflow-x-auto focus-visible:outline-offset-2">
           <table className="w-full min-w-[46rem] text-sm" data-testid="rsvp-table">
-            <thead className="text-left text-xs font-semibold uppercase tracking-wide text-ink-muted">
-              <tr><th scope="col" className="py-1 pr-2">Name</th><th scope="col" className="py-1 pr-2">Phone</th><th scope="col" className="px-1 py-1 text-right">People</th>
-                <th scope="col" className="py-1 pr-2">Answer</th><th scope="col" className="py-1 pr-2">Functions</th><th scope="col" className="py-1 pr-2">Meal</th>
-                <th scope="col" className="py-1 pr-2">Updated (IST)</th><th scope="col" className="py-1"><span className="sr-only">Actions</span></th></tr>
+            <thead className="text-left text-xs font-semibold text-ink-muted">
+              <tr><th scope="col" className="pb-2 pr-3">Name</th><th scope="col" className="pb-2 pr-3">Phone</th><th scope="col" className="px-2 pb-2 text-right">People</th>
+                <th scope="col" className="pb-2 pr-3">Answer</th><th scope="col" className="pb-2 pr-3">Functions</th><th scope="col" className="pb-2 pr-3">Meal</th>
+                <th scope="col" className="pb-2 pr-3">Updated (IST)</th><th scope="col" className="pb-2"><span className="sr-only">Actions</span></th></tr>
             </thead>
             <tbody>
               {rows.slice(0, limit).map(e => {
                 const dupOf = e.possibleDuplicateOf ? plan.rsvpEntries.find(x => x.id === e.possibleDuplicateOf) : undefined;
                 return (
                   <tr key={e.id} className="border-t border-line-soft align-top" data-testid={`rsvp-row-${e.id}`} data-answer={e.answer} data-party={e.partySize} data-dup={dupOf ? "true" : "false"}>
-                    <td className="py-1.5 pr-2 font-medium text-ink">
+                    <td className="py-2.5 pr-3 font-medium text-ink">
                       <span className="flex flex-wrap items-center gap-1.5">{e.name}{e.vip && <Badge tone="primary"><Star size={12} aria-hidden="true" />VIP</Badge>}
                         {dupOf && <Badge tone="warning">possible duplicate of {dupOf.name}</Badge>}</span>
                     </td>
-                    <td className="whitespace-nowrap py-1.5 pr-2 tabular-nums text-ink-muted">{e.phone ? formatPhone(e.phone) : "None"}</td>
-                    <td className="px-1 py-1.5 text-right tabular-nums text-ink">{e.partySize}{e.kids ? <span className="block text-xs text-ink-muted">{e.kids} kids</span> : null}</td>
-                    <td className="py-1.5 pr-2 text-ink">{ANSWER_LABEL[e.answer]}</td>
-                    <td className="py-1.5 pr-2 text-ink">{e.answer === "not_coming" ? "" : e.functions.map(fnName).filter(Boolean).join(", ")}</td>
-                    <td className="py-1.5 pr-2 text-ink">{e.answer === "not_coming" ? "" : MEAL_LABEL[e.meal]}</td>
-                    <td className="whitespace-nowrap py-1.5 pr-2 tabular-nums text-ink-muted">{whenText(e.updatedAt || e.createdAt)}</td>
-                    <td className="py-1.5">
+                    <td className="whitespace-nowrap py-2.5 pr-3 tabular-nums text-ink-muted">{e.phone ? formatPhone(e.phone) : "None"}</td>
+                    <td className="px-2 py-2.5 text-right tabular-nums text-ink">{e.partySize}{e.kids ? <span className="block text-xs text-ink-muted">{e.kids} kids</span> : null}</td>
+                    <td className="py-2.5 pr-3 text-ink">{ANSWER_LABEL[e.answer]}</td>
+                    <td className="py-2.5 pr-3 text-ink">{e.answer === "not_coming" ? "" : e.functions.map(fnName).filter(Boolean).join(", ")}</td>
+                    <td className="py-2.5 pr-3 text-ink">{e.answer === "not_coming" ? "" : MEAL_LABEL[e.meal]}</td>
+                    <td className="whitespace-nowrap py-2.5 pr-3 tabular-nums text-ink-muted">{whenText(e.updatedAt || e.createdAt)}</td>
+                    <td className="py-2.5 pr-3">
                       <span className="flex flex-wrap justify-end gap-1.5">
                         <button type="button" aria-pressed={e.vip} onClick={() => run(`${e.vip ? "Unmark" : "Mark"} VIP ${e.name}`, { op: "set_rsvp_vip", entryId: e.id, vip: !e.vip }, e.vip ? `${e.name} is no longer VIP.` : `${e.name} is VIP.`)}
                           data-testid={`rsvp-vip-${e.id}`} className={`${btn} ${e.vip ? "border-brand-700 bg-brand-50 text-brand-800" : ""}`}><Star size={15} aria-hidden="true" />VIP<span className="sr-only">: {e.name}</span></button>

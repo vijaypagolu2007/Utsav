@@ -17,7 +17,7 @@ export const MORE_PAGES: readonly PageId[] = ["schedule", "event", "guests", "id
 export function PageTabs({ current }: { current: PageId | null }) {
   return (
     <nav aria-label="Pages" className="border-t border-line-soft">
-      <ul className="mx-auto flex max-w-[100rem] items-stretch gap-1 overflow-x-auto px-3 sm:px-4 lg:px-6">
+      <ul className="mx-auto flex max-w-7xl items-stretch gap-1 overflow-x-auto px-1 sm:px-3 lg:px-5">
         {PAGES.map(p => {
           const Icon = ICONS[p.id];
           const on = p.id === current;

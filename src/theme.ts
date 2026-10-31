@@ -42,3 +42,12 @@ export function subscribeTheme(cb: () => void) {
   window.addEventListener("storage", onStorage);
   return () => { listeners.delete(cb); window.removeEventListener("storage", onStorage); };
 }
+
+/** The header toggle's cycle: System, then Light, then Dark, then back to System (the order of THEME_PREFS). */
+export function nextThemePref(pref: ThemePref): ThemePref {
+  return THEME_PREFS[(THEME_PREFS.indexOf(pref) + 1) % THEME_PREFS.length]!;
+}
+/** The toggle's accessible name: what the theme is now and what a press switches to, e.g. "Theme: Dark. Switch to System". */
+export function themeToggleLabel(pref: ThemePref): string {
+  return `Theme: ${THEME_LABELS[pref]}. Switch to ${THEME_LABELS[nextThemePref(pref)]}`;
+}

@@ -94,13 +94,13 @@ export default function PublicGuestPage({ eventId }: { eventId: string }) {
 
   if (removed) return (
     <main className="grid min-h-screen place-items-center p-6" data-testid="guest-removed">
-      <div className="max-w-md rounded-2xl bg-white p-6 text-center shadow">
+      <div className="max-w-md rounded-xl border border-line bg-surface p-6 text-center text-ink shadow-sm">
         <h1 className="mb-2 text-lg font-semibold">This event was removed by the organizer</h1>
         <p className="text-sm text-sand-700">The invitation isn&apos;t available any more. If you think this is a mistake, ask the organizer: they can restore it.</p>
       </div>
     </main>
   );
-  if (error) return <main className="grid min-h-screen place-items-center p-6"><div className="max-w-md rounded-2xl bg-white p-6 text-center shadow" role="alert"><h1 className="mb-2 text-lg font-semibold">Link unavailable</h1><p className="text-sm text-sand-600">{error}</p></div></main>;
+  if (error) return <main className="grid min-h-screen place-items-center p-6"><div className="max-w-md rounded-xl border border-line bg-surface p-6 text-center text-ink shadow-sm" role="alert"><h1 className="mb-2 text-lg font-semibold">Link unavailable</h1><p className="text-sm text-sand-600">{error}</p></div></main>;
   if (!view) return <main className="grid min-h-screen place-items-center text-sm text-sand-600" aria-busy="true">Loading your invitation…</main>;
 
   const mine = view.mine;
@@ -112,17 +112,17 @@ export default function PublicGuestPage({ eventId }: { eventId: string }) {
   const errFor = (from: string) => (failed && source === from ? noticeId : undefined);
   const input = "mt-1 block min-h-11 w-full rounded-lg border border-sand-500 bg-white px-3 text-base text-sand-900";
   return (
-    <main className="mx-auto max-w-3xl space-y-4 p-4 pb-16" data-testid="public-guest-page">
+    <main className="mx-auto w-full max-w-3xl space-y-6 px-4 pb-16 pt-6 sm:px-6 sm:pt-10" data-testid="public-guest-page">
       {/* hero-silk (globals.css): deep maroon-to-kumkum silk in both themes, white text at 4.5:1 or better everywhere on it. */}
-      <section className="hero-silk rounded-3xl p-5 text-white shadow-lg sm:p-6">
-        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest"><PartyPopper size={14} /> You&apos;re invited</div>
-        <h1 className="mt-1 break-words text-2xl font-bold">{view.title}</h1>
-        <p className="text-sm">{view.hosts ? `${view.hosts} · ` : ""}{view.city} · {prettyDate(view.startDate)}{view.endDate !== view.startDate ? ` – ${prettyDate(view.endDate)}` : ""}</p>
+      <section className="hero-silk rounded-2xl p-6 text-white shadow-lg sm:p-8">
+        <div className="flex items-center gap-2 text-sm font-medium"><PartyPopper size={16} aria-hidden="true" /> You&apos;re invited</div>
+        <h1 className="mt-2 break-words text-2xl font-semibold leading-tight sm:text-3xl">{view.title}</h1>
+        <p className="mt-2 text-sm">{view.hosts ? `${view.hosts} · ` : ""}{view.city} · {prettyDate(view.startDate)}{view.endDate !== view.startDate ? ` – ${prettyDate(view.endDate)}` : ""}</p>
         {form?.closesAt && !form.closed && <p className="mt-2 text-sm" data-testid="rsvp-closes">Please reply by {formatIst(form.closesAt)}</p>}
       </section>
 
       {/* Always mounted so screen readers hear each save result (a live region added together with its text is often missed). */}
-      <div role="status" aria-live="polite">{notice && <div id={noticeId} className={`rounded-xl px-4 py-2 text-sm text-white ${failed ? "bg-red-700" : "bg-sand-800"}`}>{notice}</div>}</div>
+      <div role="status" aria-live="polite">{notice && <div id={noticeId} className={`rounded-lg px-4 py-3 text-sm text-white ${failed ? "bg-red-700" : "bg-sand-800"}`}>{notice}</div>}</div>
 
       {form && (
         <Card title={confirmed && live ? "Thank you!" : "RSVP"} icon={<Utensils size={16} className="text-emerald-700" />}>

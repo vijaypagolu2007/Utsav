@@ -41,10 +41,10 @@ function ConfirmOpen({ title, children, actions, cancelLabel, onClose, testId = 
     <dialog ref={ref} aria-labelledby={titleId} aria-describedby={descId} data-testid={testId}
       onClose={() => { if (!ref.current?.open) onClose(); }} onCancel={e => { if (!dismissible) e.preventDefault(); }}
       className="m-auto max-h-[min(85dvh,100%)] w-[calc(100%-2rem)] max-w-md overflow-hidden rounded-2xl border border-line bg-surface p-0 text-ink shadow-xl backdrop:bg-sand-900/40">
-      <div className="max-h-[min(85dvh,100%)] overflow-y-auto overscroll-contain p-5">
-        <h2 id={titleId} className="break-words text-base font-semibold">{title}</h2>
-        <div id={descId} className="mt-1 text-sm text-ink-muted">{children}</div>
-        <div className="mt-4 flex flex-wrap justify-end gap-2">
+      <div className="max-h-[min(85dvh,100%)] overflow-y-auto overscroll-contain p-5 sm:p-6">
+        <h2 id={titleId} className="break-words text-lg font-semibold leading-snug">{title}</h2>
+        <div id={descId} className="mt-2 text-sm leading-relaxed text-ink-muted">{children}</div>
+        <div className="mt-6 flex flex-wrap justify-end gap-2">
           {cancelLabel && (
             <button ref={safe} type="button" onClick={onClose} data-testid={`${testId}-cancel`} className={`${btn} ${tones.neutral}`}>{cancelLabel}</button>
           )}

@@ -171,7 +171,7 @@ export function WhatIfPanel({ plan, commit }: { plan: AgentState; commit: Commit
           {preview && !preview.ok && <p className="rounded-lg bg-surface-muted px-3 py-2 text-sm text-ink">{preview.reason}</p>}
           {preview?.ok && (
             <div className="space-y-2">
-              <dl className="grid grid-cols-2 gap-2 rounded-xl border border-line bg-surface-muted p-3 text-sm tabular-nums">
+              <dl className="grid grid-cols-2 gap-2 rounded-lg border border-line bg-surface-muted p-4 text-sm tabular-nums">
                 <div><dt className="text-ink-muted">Not yet planned now</dt><dd className="font-semibold text-ink">{preview.headroomBefore < 0 ? `${inr(-preview.headroomBefore)} over` : inr(preview.headroomBefore)}</dd></div>
                 <div><dt className="text-ink-muted">After this change</dt><dd data-testid="whatif-headroom" className={`font-semibold ${preview.headroomAfter < 0 ? "text-red-700" : "text-ink"}`}>{preview.headroomAfter < 0 ? `${inr(-preview.headroomAfter)} over` : inr(preview.headroomAfter)}</dd></div>
               </dl>

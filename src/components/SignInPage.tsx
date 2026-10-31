@@ -137,7 +137,7 @@ export default function SignInPage() {
   let body: ReactNode;
   if (verify) {
     body = (
-      <section aria-labelledby="signin-form-heading" data-testid="signin-verify" className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
+      <section aria-labelledby="signin-form-heading" data-testid="signin-verify" className="rounded-xl border border-line bg-surface p-4 shadow-sm sm:p-6">
         <h2 id="signin-form-heading" ref={formHeading} tabIndex={-1} className="flex items-center gap-2 text-lg font-semibold text-ink">
           <MailCheck size={18} aria-hidden="true" className="text-emerald-700" />Verify your email
         </h2>
@@ -160,7 +160,7 @@ export default function SignInPage() {
   } else if (phase.kind === "unavailable") {
     body = (
       <section aria-labelledby="signin-unavailable-heading" data-testid="signin-unavailable" data-reason={phase.reason}
-        className="rounded-2xl border border-amber-300 bg-amber-50 p-5">
+        className="rounded-xl border border-amber-300 bg-amber-50 p-4 sm:p-6">
         <h2 id="signin-unavailable-heading" className="flex items-center gap-2 text-lg font-semibold text-amber-900">
           <AlertTriangle size={18} aria-hidden="true" className="text-amber-800" />Sign-in unavailable
         </h2>
@@ -171,7 +171,7 @@ export default function SignInPage() {
     const loading = phase.kind === "loading";
     const heading = mode === "signin" ? "Sign in with email" : mode === "signup" ? "Create an account" : "Reset your password";
     body = (
-      <section aria-labelledby="signin-form-heading" className="rounded-2xl border border-line bg-surface p-5 shadow-sm" aria-busy={loading || undefined}>
+      <section aria-labelledby="signin-form-heading" className="rounded-xl border border-line bg-surface p-4 shadow-sm sm:p-6" aria-busy={loading || undefined}>
         {mode !== "reset" && (
           <>
             <button type="button" onClick={() => void google()} disabled={loading || !!busy} data-testid="signin-google" className={secondaryBtn}>
@@ -226,19 +226,19 @@ export default function SignInPage() {
     <div className="min-h-dvh w-full bg-canvas">
       <a href="#main" className="sr-only rounded-lg bg-sand-900 text-sm font-semibold text-white shadow-lg focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50 focus:px-4 focus:py-3">Skip to main content</a>
       <header className="festive-rule relative border-b border-line bg-surface">
-        <div className="mx-auto flex max-w-5xl items-center gap-2.5 px-4 py-3">
+        <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
           <div aria-hidden="true" className="logo-tile grid h-9 w-9 shrink-0 place-items-center rounded-xl shadow-sm"><PartyPopper size={18} /></div>
-          <p className="text-sm font-semibold uppercase tracking-wider text-ink-muted">Utsav Co-Pilot</p>
+          <p className="text-sm font-semibold text-ink">Utsav Co-Pilot</p>
         </div>
       </header>
-      <main id="main" tabIndex={-1} data-testid="signin-page" data-phase={phase.kind} className="mx-auto max-w-md px-4 py-6 focus-visible:outline-none sm:py-10">
-        <h1 className="text-3xl font-semibold leading-tight text-ink">Sign in to Utsav</h1>
-        <p className="mt-2 text-base text-ink-muted">Keep a cloud copy of your plans and open them on any device. Signing in is optional.</p>
+      <main id="main" tabIndex={-1} data-testid="signin-page" data-phase={phase.kind} className="mx-auto w-full max-w-md px-4 pb-16 pt-6 focus-visible:outline-none sm:px-6 sm:pt-12">
+        <h1 className="text-2xl font-semibold leading-tight text-ink sm:text-3xl">Sign in to Utsav</h1>
+        <p className="mt-2 text-base leading-relaxed text-ink-muted">Keep a cloud copy of your plans and open them on any device. Signing in is optional.</p>
         <div className="mt-6">{body}</div>
-        <section aria-labelledby="signin-skip-heading" className="mt-6 rounded-2xl border border-line bg-surface-muted p-5">
+        <section aria-labelledby="signin-skip-heading" className="mt-6 rounded-xl border border-line bg-surface-muted p-4 sm:p-6">
           <h2 id="signin-skip-heading" className="text-base font-semibold text-ink">No account needed</h2>
           <p className="mt-1 text-sm text-ink-muted">Plans save in this browser. You can sign in later from the header.</p>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
             <Link href={next} onClick={() => skipSignInForSession()} data-testid="signin-skip" className={secondaryBtn}>
               {returning ? "Use without an account" : "Try without an account"}
             </Link>

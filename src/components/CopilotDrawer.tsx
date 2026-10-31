@@ -82,7 +82,7 @@ export default function CopilotDrawer({ open, onClose, titleId, dialogId, launch
       onClose={handleClose}
       onPointerDown={e => { downOnBackdrop.current = e.target === e.currentTarget; }}
       onClick={e => { if (downOnBackdrop.current && e.target === e.currentTarget) dialogRef.current?.close(); downOnBackdrop.current = false; }}
-      className="drawer fixed inset-y-0 left-auto right-0 m-0 h-dvh max-h-none w-full max-w-none overflow-hidden border-l border-line bg-surface p-0 text-ink shadow-2xl backdrop:bg-sand-900/40 sm:w-[min(420px,calc(100vw-16px))]">
+      className="drawer fixed inset-y-0 left-auto right-0 m-0 h-dvh max-h-none w-full max-w-none overflow-hidden border-l border-line bg-surface p-0 text-ink shadow-xl backdrop:bg-sand-900/40 sm:w-[min(420px,calc(100vw-16px))]">
       {children}
     </dialog>
   );

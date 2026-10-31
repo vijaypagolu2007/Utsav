@@ -21,11 +21,13 @@ async function axe(page: Page) {
 }
 const theme = (page: Page) => page.locator("html").getAttribute("data-theme");
 const bg = (page: Page) => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+const LABEL = { system: "System", light: "Light", dark: "Dark" } as const;
+/** v8 Part 3: the header toggle cycles System, Light, Dark; press it until the preference is v (at most two presses). */
 async function setTheme(page: Page, v: "light" | "dark" | "system") {
-  const more = page.getByRole("button", { name: "More", exact: true });
-  if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
-  await page.getByLabel("Theme").selectOption(v);
-  await page.keyboard.press("Escape");
+  const toggle = page.getByTestId("theme-toggle");
+  for (let i = 0; i < 3 && (await toggle.getAttribute("data-theme-pref")) !== v; i++) await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-label", new RegExp(`^Theme: ${LABEL[v]}\\. Switch to `));
+  await expect(page.locator("html")).toHaveAttribute("data-theme-pref", v);
 }
 
 test("System is the default and follows prefers-color-scheme", async ({ page }) => {
@@ -36,8 +38,9 @@ test("System is the default and follows prefers-color-scheme", async ({ page }) 
   expect(await page.evaluate(() => localStorage.getItem("utsav_theme_v1"))).toBeNull();
   await page.emulateMedia({ colorScheme: "light" });
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-  await page.getByRole("button", { name: "More", exact: true }).click();
-  await expect(page.getByLabel("Theme")).toHaveValue("system");
+  // The header toggle (no longer inside More) shows System and offers Light next.
+  await expect(page.getByTestId("theme-toggle")).toHaveAttribute("aria-label", "Theme: System. Switch to Light");
+  await expect(page.locator("html")).toHaveAttribute("data-theme-pref", "system");
 });
 
 test("the choice persists under utsav_theme_v1, separately from the plan, and is applied before first paint", async ({ page }) => {
@@ -156,7 +159,7 @@ for (const [t, kind] of [["wedding", "invite"], ["community", "public"], ["birth
       await submitRsvp(g, { name: "Asha Rao", party: 2, functions: [t === "birthday" ? "bs2" : "s3"] });
       expect(await axe(g), `RSVP confirmation ${t} (dark)`).toEqual([]);
     }
-    await g.getByLabel("Theme").selectOption("light");
+    await g.getByTestId("theme-select").selectOption("light"); // the public page footer keeps the labelled select
     expect(await theme(g)).toBe("light");
     expect(await axe(g), `public guest page ${t} (light, toggled)`).toEqual([]);
     await ctx.close();

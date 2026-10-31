@@ -454,11 +454,15 @@ describe("guest links: 410 while the event is deleted", () => {
 
 // ---------- UI pieces (static: no browser) ----------
 describe("delete UI (static)", () => {
-  test("Overview: red outlined Delete event for every event; samples add Reset sample before it (v8 Part 0d)", () => {
+  test("Overview: red outlined Delete event in the hero header for every event; no Reset sample there (v8 Part 3b)", () => {
     const pages = src("../components/PlannerPages.tsx");
     assert.match(pages, /data-testid="overview-delete-event"[\s\S]*?border border-red-600 bg-surface[^"]*text-red-700/);
-    assert.match(pages, /\{actions\.isSample && \([\s\S]*?data-testid="overview-reset-sample"[\s\S]*?\)\}\s*<button type="button" onClick=\{actions\.requestDelete\} data-testid="overview-delete-event"/);
-    assert.doesNotMatch(pages, /actions\.canDelete/);
+    // The separate event-name row is gone: the h1 itself is the rename target, beside its pencil, in the hero header.
+    assert.match(pages, /<InlineEdit label="event name"[\s\S]*?<h1 id="overview-h" tabIndex=\{-1\} data-testid="page-heading"[\s\S]*?<\/InlineEdit>\s*<button type="button" onClick=\{requestDelete\} data-testid="overview-delete-event"/);
+    assert.doesNotMatch(pages, /overview-reset-sample|Reset sample|actions\.isSample|actions\.canDelete/);
+    // A sample is still reset from the More menu.
+    assert.match(src("../components/CommandBar.tsx"), /\{ id: "reset", label: "Reset", icon: <RotateCcw size=\{16\} \/>, onSelect: onReset,/);
+    assert.match(src("../components/PlannerApp.tsx"), /onReset=\{resetTemplate\}/);
   });
   test("event menu: the event stays a menuitemradio; its Delete is a separate labelled menuitem; Hide samples is a menuitemcheckbox", () => {
     const bar = src("../components/CommandBar.tsx");

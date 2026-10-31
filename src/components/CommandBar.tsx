@@ -9,7 +9,7 @@ import type { SwitcherEntry, SwitcherSections } from "@/my-events";
 import { daysLeft, type TrashItem } from "@/trash";
 import { Chip, IconButton, longDate, severityTone } from "./ui";
 import { SeverityIcon } from "./Overview";
-import ThemeSelect from "./ThemeSelect";
+import ThemeToggle from "./ThemeToggle";
 
 type Props = {
   plan: AgentState; today: string; setToday: (d: string) => void; insights: PlanInsights;
@@ -99,7 +99,7 @@ function MoreMenu({ items, children }: { items: MenuItem[]; children: ReactNode 
         <MoreHorizontal size={16} aria-hidden="true" /> More
       </button>
       {open && (
-        <div className="absolute right-0 z-40 mt-2 w-[min(20rem,calc(100vw-1.5rem))] rounded-xl border border-line bg-surface p-1.5 shadow-xl">
+        <div className="absolute right-0 z-40 mt-2 w-[min(20rem,calc(100vw-1.5rem))] rounded-xl border border-line bg-surface p-1.5 shadow-lg">
           <div role="menu" id={menuId} aria-labelledby={btnId} onKeyDown={onMenuKey}>
             {items.map((it, i) => (
               <button key={it.id} ref={el => { itemRefs.current[i] = el; }} type="button" role="menuitem" tabIndex={-1} title={it.title}
@@ -201,7 +201,7 @@ function EventSwitcher({ title, active, events, onSwitch, onNewPlan, onLoadSampl
       </div>
     );
   };
-  const heading = "px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wider text-ink-muted";
+  const heading = "px-3 pb-1 pt-2 text-xs font-semibold text-ink-muted";
 
   return (
     <div ref={wrap} className="relative min-w-0"
@@ -216,7 +216,7 @@ function EventSwitcher({ title, active, events, onSwitch, onNewPlan, onLoadSampl
       </button>
       {open && (
         <div data-testid="event-menu"
-          className="absolute left-0 z-40 mt-2 max-h-[min(30rem,75dvh)] w-[min(24rem,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain rounded-xl border border-line bg-surface p-1.5 shadow-xl max-sm:fixed max-sm:inset-x-3 max-sm:w-auto">
+          className="absolute left-0 z-40 mt-2 max-h-[min(30rem,75dvh)] w-[min(24rem,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain rounded-xl border border-line bg-surface p-1.5 shadow-lg max-sm:fixed max-sm:inset-x-3 max-sm:w-auto">
           <div ref={menu} role="menu" id={menuId} aria-labelledby={btnId} onKeyDown={onMenuKey}>
             {events.mine.length > 0 && (
               <div role="group" aria-labelledby={mineId}>
@@ -321,12 +321,12 @@ export default function CommandBar({ plan, today, setToday, insights, activeTemp
 
   return (
     <header ref={headerRef} className="festive-rule relative z-30 border-b border-line bg-surface/95 backdrop-blur md:sticky md:top-0">
-      <div className="mx-auto flex max-w-[100rem] flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 sm:px-4 xl:flex-nowrap">
+      <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-4 gap-y-3 py-3 px-4 sm:px-6 lg:px-8 xl:flex-nowrap">
         {/* Brand + the event's name. Not a heading: each page has its own h1 (on Overview, the event's name). */}
-        <div className="flex min-w-0 flex-1 items-center gap-2.5 xl:max-w-[19rem] xl:flex-initial 2xl:max-w-[24rem]">
+        <div className="flex min-w-0 flex-1 items-center gap-2.5 xl:max-w-[17rem] xl:flex-initial 2xl:max-w-[24rem]">
           <div aria-hidden="true" className="logo-tile grid h-9 w-9 shrink-0 place-items-center rounded-xl shadow-sm"><PartyPopper size={18} /></div>
           <div className="min-w-0 flex-1 leading-tight">
-            <p className="text-xs font-semibold uppercase tracking-wider text-ink-muted">Utsav Co-Pilot</p>
+            <p className="text-xs font-medium text-ink-muted">Utsav Co-Pilot</p>
             {guest
               ? <p className="line-clamp-2 break-words text-sm font-semibold text-ink sm:text-base xl:line-clamp-1" title={plan.event.title}>{plan.event.title}</p>
               : <EventSwitcher title={empty ? "No events" : plan.event.title} active={activeTemplate} events={events} onSwitch={onSwitch} onNewPlan={onNewPlan} onLoadSamples={onLoadSamples}
@@ -355,7 +355,7 @@ export default function CommandBar({ plan, today, setToday, insights, activeTemp
                   {flagCount ? <AlertTriangle size={16} aria-hidden="true" /> : <CheckCircle2 size={16} aria-hidden="true" />} <span className="whitespace-nowrap">{flagCount}<span className="max-sm:sr-only xl:max-2xl:sr-only"> red flag{flagCount === 1 ? "" : "s"}</span></span>
                 </button>
                 {flagsOpen && (
-                  <div ref={flagsBox} id={flagsId} className="absolute right-0 z-40 mt-2 max-h-[min(26rem,70dvh)] w-[min(26rem,calc(100vw-1.5rem))] overflow-y-auto rounded-xl border border-line bg-surface p-2 shadow-xl max-sm:fixed max-sm:inset-x-3 max-sm:w-auto">
+                  <div ref={flagsBox} id={flagsId} className="absolute right-0 z-40 mt-2 max-h-[min(26rem,70dvh)] w-[min(26rem,calc(100vw-1.5rem))] overflow-y-auto rounded-xl border border-line bg-surface p-2 shadow-lg max-sm:fixed max-sm:inset-x-3 max-sm:w-auto">
                     {insights.insights.length === 0 && <p className="p-3 text-sm text-ink-muted">All clear.</p>}
                     <ul>
                       {insights.insights.map(i => (
@@ -382,7 +382,7 @@ export default function CommandBar({ plan, today, setToday, insights, activeTemp
                   <div>
                     <label htmlFor={dateId} className="flex items-center gap-1.5 text-sm font-medium text-ink"><CalendarDays size={16} aria-hidden="true" /> Planning date</label>
                     <input id={dateId} type="date" value={today} aria-describedby={dateHintId} onChange={e => e.target.value && setToday(e.target.value)}
-                      className="mt-1 h-11 w-full rounded-lg border border-line-strong bg-surface px-2 text-sm tabular-nums text-ink" />
+                      className="mt-1 h-11 w-full rounded-lg border border-line-strong bg-surface px-3 text-sm tabular-nums text-ink" />
                     <p id={dateHintId} className="mt-1 text-sm tabular-nums text-ink-muted"><span className="font-medium text-ink">{longDate(today)}</span> · move it to time-travel the red flags</p>
                   </div>
                   <div>
@@ -392,7 +392,6 @@ export default function CommandBar({ plan, today, setToday, insights, activeTemp
                       aria-valuetext={`Step ${historyIdx + 1} of ${history.length}: ${history[historyIdx] ?? ""}`} />
                     <p className="break-words text-sm text-ink-muted">{history[historyIdx]}</p>
                   </div>
-                  <ThemeSelect />
                   <p className="border-t border-line pt-2 text-xs text-ink-muted">{plan.guests.length} guests on list · {plan.subEvents.length} sub-events · autosaved</p>
                 </div>
               </MoreMenu>
@@ -400,7 +399,8 @@ export default function CommandBar({ plan, today, setToday, insights, activeTemp
           )}
         </div>}
 
-        {/* Top right: the account control (the Co-Pilot launcher floats at the bottom right instead). */}
+        {/* Top right: the theme toggle (both views, every width), then the account control (the Co-Pilot launcher floats at the bottom right instead). */}
+        <div className="order-2 shrink-0 xl:order-none"><ThemeToggle /></div>
         <div className="order-2 shrink-0 xl:order-none" data-testid="header-account-slot">{account}</div>
       </div>
       {nav}

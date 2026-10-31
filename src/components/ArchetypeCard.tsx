@@ -19,7 +19,7 @@ import { labelOf, PERMIT_STATUS_OPTIONS, SPONSOR_STATUS_OPTIONS, SPONSOR_TIER_OP
 
 type SectionProps = { plan: AgentState; today: string; commit: Commit; highlight: Highlight; onAsk: (text: string) => void };
 type Props = SectionProps & { template: EventTemplate };
-const sel = "min-h-9 rounded-lg border border-line-strong bg-surface px-2 text-sm text-ink max-md:min-h-11 pointer-coarse:min-h-11";
+const sel = "min-h-9 rounded-lg border border-line-strong bg-surface px-3 text-sm text-ink max-md:min-h-11 pointer-coarse:min-h-11";
 const field = "mt-1 block min-h-10 w-full rounded-lg border border-line-strong bg-surface px-2.5 text-sm text-ink max-md:min-h-11";
 function SubHead({ icon, children, right }: { icon: ReactNode; children: ReactNode; right?: ReactNode }) {
   return (
@@ -35,7 +35,7 @@ function CoupleProfile({ plan }: SectionProps) {
   const ext = plan.event.ext;
   if (ext.type !== "wedding") return null;
   return (
-    <div className="rounded-xl bg-gradient-to-br from-maroon-50 to-marigold-50 p-4 ring-1 ring-inset ring-maroon-200">
+    <div className="rounded-xl bg-maroon-50 p-4 ring-1 ring-inset ring-maroon-200 sm:p-5">
       <h3 className="flex items-center gap-2 text-base font-semibold text-maroon-800"><Heart size={16} aria-hidden="true" /> {ext.partners.filter(Boolean).join(" & ") || "Partners"}</h3>
       <div className="mt-2 flex flex-wrap gap-1.5">{ext.traditions.map(t => <Badge key={t} tone="secondary">{t}</Badge>)}</div>
       {ext.rsvpDeadline && <p className="mt-2 text-sm tabular-nums text-sand-700">RSVP deadline <b>{longDate(ext.rsvpDeadline)}</b></p>}
@@ -216,7 +216,7 @@ function ActivityRunSheet({ plan, commit, highlight }: SectionProps) {
       {ext.activities.length === 0 ? <Empty>No activities yet.</Empty> : (
         <ol className="divide-y divide-line-soft rounded-xl ring-1 ring-inset ring-line">
           {ext.activities.map((a, k) => (
-            <li key={a.id} id={refAnchor(a.id)} data-testid="activity-row" className={`px-3 py-2.5 ${hl(a.id)}`}>
+            <li key={a.id} id={refAnchor(a.id)} data-testid="activity-row" className={`px-4 py-3 ${hl(a.id)}`}>
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                 <span className="text-base font-medium text-ink">{a.name}</span>
                 <span className="text-sm tabular-nums text-ink-muted">{times && <>{times[k]!.label} · </>}{a.durationMin} min · {ageLabel(a.ageRange)}</span>
@@ -278,7 +278,7 @@ function ActivityRunSheet({ plan, commit, highlight }: SectionProps) {
             onBlur={e => { if (startDraft !== null) setStart(e.target.value); }}
             onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); setStart(e.currentTarget.value); } }}
             data-testid="party-start" aria-describedby={`${formId}-start-hint`}
-            className="mt-1 block min-h-11 rounded-lg border border-line-strong bg-surface px-2.5 text-sm text-ink tabular-nums" />
+            className="mt-1 block min-h-11 rounded-lg border border-line-strong bg-surface px-3 text-sm text-ink tabular-nums" />
         </label>
         {ext.partyStart && <button type="button" onClick={() => setStart("")} data-testid="party-start-clear" className={`${big} text-ink-muted underline-offset-2 hover:underline`}>Clear start time</button>}
         <p id={`${formId}-start-hint`} className="basis-full text-xs text-ink-muted">{ext.partyStart ? "Each row's time is worked out from the start time and the minutes above it." : "Optional. Set it to see when each activity starts and ends."}</p>
@@ -483,8 +483,8 @@ const ICONS: Record<EventTemplate["layout"]["icon"], ReactNode> = {
 };
 const ARRANGEMENT: Record<EventTemplate["layout"]["arrangement"], string> = {
   // Container queries: the card arranges by its own width (the /event page is full width, a phone is not).
-  "main-aside": "grid gap-5 @3xl:grid-cols-[1fr_16rem] @6xl:grid-cols-[1fr_20rem]",
-  "two-up": "grid gap-5 @3xl:grid-cols-2",
+  "main-aside": "grid gap-6 @3xl:grid-cols-[1fr_16rem] @6xl:grid-cols-[1fr_20rem]",
+  "two-up": "grid gap-6 @3xl:grid-cols-2",
 };
 
 export default function ArchetypeCard({ template, ...props }: Props) {

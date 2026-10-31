@@ -200,9 +200,9 @@ describe("Co-Pilot delete_event on a sample", () => {
     const g = runOfflineGuestAgent(st, "delete this event", TODAY, st.guests[0]?.id ?? null);
     assert.ok(!g.actions.some(a => a.kind === "batch" && a.batch.commands.some(c => c.op === "delete_event")));
   });
-  test("approving the card opens the same confirm for samples (no 'use Reset sample' refusal any more)", () => {
+  test("approving the card opens the same confirm for samples (no 'use Reset sample' refusal; v8 Part 3b: no Overview Reset sample at all)", () => {
     const app = plannerSource();
-    assert.doesNotMatch(app, /use Reset sample on the Overview instead/);
+    assert.doesNotMatch(app, /use Reset sample on the Overview instead|Reset sample|resetSample/);
     assert.match(app, /requestDelete\(storeRef\.current\.active, ok =>/);
   });
 });

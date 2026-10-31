@@ -49,24 +49,24 @@ export default function GuestsPage() {
   const households = plan.households.length, guests = plan.guests.length;
   const pending = plan.joinRequests.filter(r => r.status === "pending").length;
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-ink-muted" data-testid="guests-summary">
         <span className="flex items-center gap-1"><ShieldCheck size={14} aria-hidden="true" className="text-emerald-700" />Phone numbers are visible to you only, never to guests, the Co-Pilot or the logs.</span>
       </p>
       <ShareRsvpCard />
       <RsvpDashboard />
-      <details id="guests-optional" className="group rounded-2xl border border-line bg-surface" data-testid="guests-optional">
-        <summary className="flex min-h-11 cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl px-4 py-3 text-base font-semibold text-ink hover:bg-surface-muted">
+      <details id="guests-optional" className="group rounded-xl border border-line bg-surface shadow-sm" data-testid="guests-optional">
+        <summary className="flex min-h-11 cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 rounded-xl px-4 py-4 text-base font-semibold text-ink hover:bg-surface-muted sm:px-6">
           Guest list (optional)
           <span className="text-sm font-normal text-ink-muted">Not needed for RSVPs. {guests} guest{guests === 1 ? "" : "s"} in {households} household{households === 1 ? "" : "s"}</span>
           {pending > 0 && <Badge tone="warning">{pending} join request{pending === 1 ? "" : "s"} waiting</Badge>}
         </summary>
-        <div className="space-y-5 p-3 sm:p-4">
+        <div className="space-y-6 p-3 sm:p-4">
           <p className="text-sm text-ink-muted">Keep your own list of households and phone numbers here if you like (for invitations or seating). RSVPs come in through the link above, not through this list.</p>
           <AddGuests />
-          <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] xl:items-start">
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] xl:items-start">
             <HouseholdList />
-            <div className="space-y-5">
+            <div className="space-y-6">
               <JoinLinkCard />
               <ChangeLog />
             </div>
@@ -225,24 +225,24 @@ function ImportReview({ plan, pending, onDone, commit }: { plan: AgentState; pen
       {/* Focusable so keyboard users can scroll a long preview (WCAG 2.1.1). */}
       <div tabIndex={0} role="group" aria-label="Rows to import" className="relative max-h-80 overflow-auto rounded-lg border border-line-soft focus-visible:outline-offset-2">
         <table className="w-full min-w-[28rem] text-sm">
-          <thead className="sticky top-0 bg-surface-muted text-left text-xs font-semibold uppercase tracking-wide text-ink-muted">
-            <tr><th scope="col" className="px-2 py-1.5">Name</th><th scope="col" className="px-2 py-1.5">Phone</th><th scope="col" className="px-2 py-1.5">Result</th></tr>
+          <thead className="sticky top-0 bg-surface-muted text-left text-xs font-semibold text-ink-muted">
+            <tr><th scope="col" className="px-3 py-2">Name</th><th scope="col" className="px-3 py-2">Phone</th><th scope="col" className="px-3 py-2">Result</th></tr>
           </thead>
           <tbody>
             {p.entries.map((e, i) => {
               const r = p.rows[i]!;
               return (
                 <tr key={i} className="border-t border-line-soft" data-testid="import-row" data-status={r.status}>
-                  <td className="px-2 py-1.5 font-medium text-ink">{e.name}</td>
-                  <td className="px-2 py-1.5 tabular-nums text-ink-muted">{r.phone ? formatPhone(r.phone) : e.phone ?? "—"}</td>
-                  <td className="px-2 py-1.5"><Badge tone={STATUS_TONE[r.status]}>{STATUS_TEXT[r.status]}</Badge> <span className="text-xs text-ink-muted">{r.reason}</span></td>
+                  <td className="px-3 py-2.5 font-medium text-ink">{e.name}</td>
+                  <td className="px-3 py-2.5 tabular-nums text-ink-muted">{r.phone ? formatPhone(r.phone) : e.phone ?? "—"}</td>
+                  <td className="px-3 py-2.5"><Badge tone={STATUS_TONE[r.status]}>{STATUS_TEXT[r.status]}</Badge> <span className="text-xs text-ink-muted">{r.reason}</span></td>
                 </tr>
               );
             })}
             {pending.issues.map((x, i) => (
               <tr key={`x${i}`} className="border-t border-line-soft" data-testid="import-row" data-status="invalid">
-                <td className="px-2 py-1.5 text-ink-muted">{x.text}</td><td className="px-2 py-1.5">—</td>
-                <td className="px-2 py-1.5"><Badge tone="danger">Can&apos;t add</Badge> <span className="text-xs text-ink-muted">{x.reason}</span></td>
+                <td className="px-3 py-2.5 text-ink-muted">{x.text}</td><td className="px-3 py-2.5">—</td>
+                <td className="px-3 py-2.5"><Badge tone="danger">Can&apos;t add</Badge> <span className="text-xs text-ink-muted">{x.reason}</span></td>
               </tr>
             ))}
           </tbody>
@@ -309,7 +309,7 @@ function ShareRsvpCard() {
           </figure>
           <div className="min-w-0 flex-1 basis-64 space-y-3">
             <div>
-              <span className="text-xs font-semibold uppercase tracking-wide text-ink-muted">RSVP link</span>
+              <span className="text-xs font-semibold text-ink-muted">RSVP link</span>
               <p id={textId} data-testid="rsvp-link-text" className="mt-1 break-all rounded-lg bg-surface-muted px-2 py-1.5 font-mono text-xs text-sand-800">{link}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -513,7 +513,7 @@ function JoinLinkCard() {
           {pending.length === 0 ? <Empty>No requests waiting.</Empty> : (
             <ul className="space-y-2" data-testid="join-requests">
               {pending.map(r => (
-                <li key={r.id} data-testid={`join-request-${r.id}`} className="flex flex-wrap items-center gap-2 rounded-xl border border-line p-2.5">
+                <li key={r.id} data-testid={`join-request-${r.id}`} className="flex flex-wrap items-center gap-2 rounded-lg border border-line p-3">
                   <span className="min-w-0 flex-1 basis-40 text-sm"><b className="text-ink">{r.name}</b> <span className="text-ink-muted">· {r.size} {r.size === 1 ? "person" : "people"}{r.phone ? ` · ${formatPhone(r.phone)}` : ""}</span></span>
                   <button type="button" onClick={() => approve(r.id, r.name)} data-testid={`join-approve-${r.id}`} className="flex min-h-9 items-center gap-1 rounded-lg bg-emerald-700 px-3 text-sm font-semibold text-white hover:bg-emerald-800 max-md:min-h-11"><Check size={14} aria-hidden="true" />Approve<span className="sr-only"> {r.name}</span></button>
                   <button type="button" onClick={() => setReview({ summary: `Decline ${r.name}`, commands: [{ op: "reject_join_request", requestId: r.id }] })} data-testid={`join-reject-${r.id}`} className={btn}>Decline<span className="sr-only"> {r.name}</span></button>
@@ -544,16 +544,16 @@ function ChangeLog() {
       {rows.length === 0 ? <Empty>No RSVP or meal changes yet.</Empty> : (
         <div tabIndex={0} role="group" aria-label="Change log" className="relative overflow-x-auto focus-visible:outline-offset-2">
           <table className="w-full min-w-[30rem] text-sm" data-testid="rsvp-log">
-            <thead className="text-left text-xs font-semibold uppercase tracking-wide text-ink-muted">
-              <tr><th scope="col" className="py-1 pr-2">When</th><th scope="col" className="py-1 pr-2">Who</th><th scope="col" className="py-1 pr-2">Change</th><th scope="col" className="py-1">Via</th></tr>
+            <thead className="text-left text-xs font-semibold text-ink-muted">
+              <tr><th scope="col" className="pb-2 pr-3">When</th><th scope="col" className="pb-2 pr-3">Who</th><th scope="col" className="pb-2 pr-3">Change</th><th scope="col" className="pb-2">Via</th></tr>
             </thead>
             <tbody>
               {shown.map(e => (
                 <tr key={e.id} className="border-t border-line-soft align-top" data-testid="rsvp-log-row" data-source={e.source}>
-                  <td className="whitespace-nowrap py-1.5 pr-2 tabular-nums text-ink-muted">{when(e.at)}</td>
-                  <td className="py-1.5 pr-2 text-ink">{e.guestName}<span className="block text-xs text-ink-muted">{e.householdLabel}</span></td>
-                  <td className="py-1.5 pr-2 text-ink">{e.field === "rsvp" ? `${sub(e.subEventId)}: ` : "Meals: "}<span className="text-ink-muted">{e.before}</span> <span aria-hidden="true">→</span><span className="sr-only">to</span> <b>{e.after}</b></td>
-                  <td className="py-1.5 text-ink-muted">{SOURCE_LABEL[e.source]}</td>
+                  <td className="whitespace-nowrap py-2.5 pr-3 tabular-nums text-ink-muted">{when(e.at)}</td>
+                  <td className="py-2.5 pr-3 text-ink">{e.guestName}<span className="block text-xs text-ink-muted">{e.householdLabel}</span></td>
+                  <td className="py-2.5 pr-3 text-ink">{e.field === "rsvp" ? `${sub(e.subEventId)}: ` : "Meals: "}<span className="text-ink-muted">{e.before}</span> <span aria-hidden="true">→</span><span className="sr-only">to</span> <b>{e.after}</b></td>
+                  <td className="py-2.5 text-ink-muted">{SOURCE_LABEL[e.source]}</td>
                 </tr>
               ))}
             </tbody>

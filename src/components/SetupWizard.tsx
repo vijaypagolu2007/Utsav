@@ -170,19 +170,19 @@ export default function SetupWizard({ onCreate, onCancel, cancelLabel = "Cancel"
     "aria-invalid": errors[k] ? true : undefined, "aria-describedby": errId(k) });
 
   return (
-    <div data-testid="setup-wizard" className="mx-auto w-full max-w-3xl">
-      <p className="text-sm font-semibold uppercase tracking-wider text-ink-muted">New plan · Step {step} of 3</p>
-      <ol aria-label="Steps" className="mt-2 flex gap-2">
+    <div data-testid="setup-wizard" className="mx-auto w-full max-w-3xl rounded-xl border border-line bg-surface p-4 shadow-sm sm:p-8">
+      <p className="text-sm font-semibold text-ink-muted">New plan · Step {step} of 3</p>
+      <ol aria-label="Steps" className="mt-3 flex gap-2">
         {["About your event", "What matters most", "Budget by category"].map((t, i) => (
           <li key={t} aria-current={step === i + 1 ? "step" : undefined}
-            className={`flex-1 rounded-2xl px-2 py-1 text-center text-xs font-medium ring-1 ring-inset sm:rounded-full sm:px-3 sm:text-sm ${step === i + 1 ? "bg-brand-50 text-brand-800 ring-brand-200" : step > i + 1 ? "bg-emerald-50 text-emerald-800 ring-emerald-200" : "bg-sand-100 text-sand-700 ring-sand-300"}`}>
-            {step > i + 1 && <CheckCircle2 size={14} aria-hidden="true" className="mr-1 inline" />}{t}
+            className={`flex flex-1 items-center justify-center rounded-lg px-2 py-2 text-center text-xs font-medium leading-snug ring-1 ring-inset sm:px-3 sm:text-sm ${step === i + 1 ? "bg-brand-50 text-brand-800 ring-brand-200" : step > i + 1 ? "bg-emerald-50 text-emerald-800 ring-emerald-200" : "bg-sand-100 text-sand-700 ring-sand-300"}`}>
+            {step > i + 1 && <CheckCircle2 size={14} aria-hidden="true" className="mr-1.5 shrink-0" />}{t}
           </li>
         ))}
       </ol>
 
       {step === 1 ? (
-        <form noValidate onSubmit={goNext} data-testid="setup-step-1" className="mt-5 space-y-5">
+        <form noValidate onSubmit={goNext} data-testid="setup-step-1" className="mt-8 space-y-6">
           <H ref={headingRef} tabIndex={-1} className="text-2xl font-semibold text-ink focus-visible:outline-offset-4">Tell us about your event</H>
           <fieldset>
             <legend className={labelCls}>What are you planning?</legend>
@@ -240,7 +240,7 @@ export default function SetupWizard({ onCreate, onCancel, cancelLabel = "Cancel"
           </div>
         </form>
       ) : step === 2 ? (
-        <form noValidate onSubmit={toBudget} data-testid="setup-priorities" className="mt-5 space-y-4">
+        <form noValidate onSubmit={toBudget} data-testid="setup-priorities" className="mt-8 space-y-6">
           <H ref={headingRef} tabIndex={-1} className="text-2xl font-semibold text-ink focus-visible:outline-offset-4">What matters most?</H>
           <p className="max-w-2xl text-sm text-ink-muted">If money gets tight, we cut from “Cut first” before anything else and never touch what you protect. You can change this any time on the Budget page.</p>
           <fieldset>
@@ -280,10 +280,10 @@ export default function SetupWizard({ onCreate, onCancel, cancelLabel = "Cancel"
           </div>
         </form>
       ) : (
-        <form noValidate onSubmit={create} data-testid="setup-step-2" aria-busy={creating} className="mt-5 space-y-4">
+        <form noValidate onSubmit={create} data-testid="setup-step-2" aria-busy={creating} className="mt-8 space-y-6">
           <H ref={headingRef} tabIndex={-1} className="text-2xl font-semibold text-ink focus-visible:outline-offset-4">Your budget by category</H>
           <p className="max-w-2xl text-sm text-ink-muted">Turn categories on or off. Type an amount (45000) or a share (12%) for any you already know, and tick “Already booked” for anything you’ve paid for or signed. Your amounts are kept exactly; the categories you leave blank share what’s left.</p>
-          <div aria-live="polite" data-testid="setup-summary" className="grid grid-cols-3 gap-2 rounded-xl border border-line bg-surface-muted p-3 text-sm tabular-nums">
+          <div aria-live="polite" data-testid="setup-summary" className="grid grid-cols-3 gap-2 rounded-lg border border-line bg-surface-muted p-4 text-sm tabular-nums">
             <p><span className="block text-ink-muted">Total budget</span><span className="text-base font-semibold text-ink">{inr(totalRupees * 100)}</span></p>
             <p><span className="block text-ink-muted">You’ve set</span><span data-testid="setup-allocated" className="text-base font-semibold text-ink">{preview?.ok ? inr(preview.fixed) : "—"}</span></p>
             <p><span className="block text-ink-muted">{preview?.ok && preview.blank === 0 ? "Left unallocated" : "Left to share"}</span>
@@ -354,7 +354,7 @@ export default function SetupWizard({ onCreate, onCancel, cancelLabel = "Cancel"
           )}
           {submitError && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700 ring-1 ring-red-200">{submitError}</p>}
           {creating && (
-            <div role="status" className="flex items-center gap-2 rounded-xl border border-line bg-surface-muted p-3 text-sm text-ink">
+            <div role="status" className="flex items-center gap-2 rounded-lg border border-line bg-surface-muted p-4 text-sm text-ink">
               <Loader2 size={16} aria-hidden="true" className="animate-spin text-brand-700" />Drafting your sub-events, tasks and timeline, then fitting them to your budget…
             </div>
           )}

@@ -61,7 +61,7 @@ function IdeaCard({ idea, plan, headroom, onSave, onDismiss, onRestore, adopting
   const from = idea.refinedFrom ? plan.ideas.find(i => i.id === idea.refinedFrom) : null;
   return (
     <li id={refAnchor(idea.id)} className={`min-w-0 ${hl}`}>
-      <article aria-labelledby={hid} data-testid={`idea-${idea.id}`} className={`flex h-full flex-col rounded-2xl border bg-surface p-4 shadow-sm ${dismissed ? "border-dashed border-line-strong" : "border-line"}`}>
+      <article aria-labelledby={hid} data-testid={`idea-${idea.id}`} className={`flex h-full flex-col rounded-xl border bg-surface p-4 shadow-sm sm:p-5 ${dismissed ? "border-dashed border-line-strong" : "border-line"}`}>
         <div className="flex flex-wrap items-center gap-1.5">
           <Chip tone={KIND_TONE[idea.kind]} icon={<Tag size={12} />}>{IDEA_KIND_LABEL[idea.kind]}</Chip>
           {adopted ? <Chip tone="success" icon={<CheckCircle2 size={12} />}>In your plan</Chip>
@@ -166,7 +166,7 @@ export default function IdeasBoard() {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <Card id="ideas" title="Get personalised ideas" icon={<Sparkles size={18} className="text-brand-700" />}
         subtitle={<>Ideas use your event type, city, traditions, guest count, diets, note and what’s left in each budget category. {source ? <span className="inline-flex items-center gap-1 font-medium text-ink">{source === "gemini" ? <Cpu size={14} aria-hidden="true" /> : <WifiOff size={14} aria-hidden="true" />}Source: {source === "gemini" ? "Live AI (Gemini)" : "Demo Mode (curated bank)"}</span> : forceOffline ? "Demo Mode is on." : null}</>}>
         <form onSubmit={get} className="flex flex-wrap items-end gap-2">
@@ -214,7 +214,7 @@ export default function IdeasBoard() {
         </div>
         {ideasBusy && (
           <ul aria-hidden="true" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {[0, 1, 2].map(i => <li key={i} className="h-44 animate-pulse rounded-2xl border border-line bg-surface-muted" />)}
+            {[0, 1, 2].map(i => <li key={i} className="h-44 animate-pulse rounded-xl border border-line bg-surface-muted" />)}
           </ul>
         )}
         {visible.length === 0 && !ideasBusy ? (

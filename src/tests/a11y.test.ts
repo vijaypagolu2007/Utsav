@@ -152,8 +152,8 @@ describe("Utsav palette (ivory sand surfaces, kumkum primary, maroon / peacock /
     // rows, Restore on hover, the confirm dialog's red button (and its hover), and the Undo toast (white on sand-800).
     ["red-700", "surface"], ["red-700", "red-50"], ["sand-800", "sand-100"], ["sand-800", "surface"], ["white", "red-700"], ["white", "red-800"],
     ["white", "sand-800"], ["ink", "surface"], ["ink-muted", "surface"],
-    // v8 Part 0d: Reset sample next to Delete event on a sample (and its hover), "Restore samples" in the menu (on its
-    // focus/hover row) and on the setup form, and the "You have no events right now" note.
+    // v8 Part 0d: "Restore samples" in the menu (on its focus/hover row) and on the setup form, and the "You have no
+    // events right now" note (v8 Part 3b removed the Overview's Reset sample; these pairs stay for the menu and form).
     ["sand-800", "surface"], ["sand-800", "sand-100"], ["ink", "sand-100"], ["ink", "surface"], ["ink-muted", "surface"],
     // v8 Part 1: the Guests page (mode buttons pressed on brand-50, WhatsApp / Approve buttons and their hover, the reset
     // confirm strip and its button, private-link fields, status badges, errors), the wishlist manager (surprise toggle,
@@ -168,6 +168,8 @@ describe("Utsav palette (ivory sand surfaces, kumkum primary, maroon / peacock /
     // and the organizer's RSVP dashboard (tiles, tables, the VIP / duplicate badges, pressed filters, the Merge panel).
     ["ink", "surface"], ["ink-muted", "surface"], ["ink", "surface-muted"], ["brand-800", "brand-50"], ["red-700", "red-50"], ["white", "primary"],
     ["white", "primary-hover"], ["amber-900", "amber-50"], ["amber-800", "amber-50"], ["brand-700", "brand-50"], ["sand-800", "surface"], ["sand-800", "sand-100"],
+    // v8 Part 3c: the shared Button / IconButton pressed (active) states, one step darker than hover, and the empty state on the canvas.
+    ["white", "brand-900"], ["sand-800", "sand-200"], ["sand-700", "sand-200"], ["brand-800", "brand-100"], ["red-700", "red-100"], ["ink-muted", "canvas"],
   ];
   for (const [fg, bg] of text) test(`text ${fg} on ${bg} ≥ 4.5:1`, () => {
     const r = ratio(shade(fg), shade(bg));
@@ -201,8 +203,8 @@ describe("Utsav palette (ivory sand surfaces, kumkum primary, maroon / peacock /
     // white outline on the toast, the Hide samples box and icon, and the Restore icon.
     ["red-600", "surface"], ["red-600", "red-50"], ["red-700", "surface"], ["red-700", "red-50"], ["white", "sand-800"], ["sand-600", "surface"],
     ["sand-700", "surface"], ["emerald-700", "surface"],
-    // v8 Part 0d: every sample row's trash icon (red-700, also on its red-50 focus), the Reset sample / Restore samples
-    // outlines, and the Restore samples icon (on the surface and the menu's sand-100 focus row).
+    // v8 Part 0d: every sample row's trash icon (red-700, also on its red-50 focus), the Restore samples outline, and the
+    // Restore samples icon (on the surface and the menu's sand-100 focus row).
     ["red-700", "surface"], ["red-700", "red-50"], ["red-600", "surface"], ["line-strong", "surface"], ["peacock-700", "surface"], ["peacock-700", "sand-100"],
     // v8 Part 1: the pressed mode button's border (brand-700 on brand-50), the WhatsApp button on the card, the claimed
     // select's border, the Guests page and wishlist icons, and the file input and text fields' borders.
@@ -211,6 +213,8 @@ describe("Utsav palette (ivory sand surfaces, kumkum primary, maroon / peacock /
     // v8 Part 1c: the RSVP form's pill outlines (line-strong unchosen, brand-700 chosen on brand-50), the focus outline on a
     // pill, the party-size steppers' borders, the shield icon, the dashboard's trash icon and the Merge radio.
     ["line-strong", "surface"], ["line-strong", "surface-muted"], ["brand-700", "brand-50"], ["brand-700", "surface"], ["emerald-700", "surface"], ["red-700", "surface"],
+    // v8 Part 3c: the outlined Button borders on their pressed fills (secondary line-strong on sand-200, danger red-600 on red-100), and the dashed empty-state border on the canvas.
+    ["line-strong", "sand-200"], ["red-600", "red-100"], ["line-strong", "canvas"],
   ];
   for (const [fg, bg] of ui) test(`UI ${fg} on ${bg} ≥ 3:1`, () => {
     const r = ratio(shade(fg), shade(bg));

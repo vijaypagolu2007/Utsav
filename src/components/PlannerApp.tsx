@@ -32,7 +32,7 @@ import FirstChoiceDialog from "./FirstChoiceDialog";
 import { decideOpening, forgetThisDevice, signInHref, signInSkipped, SIGNIN_PATH, wasSignedInOnDevice } from "@/signin";
 import { PlannerContext, type PlannerState } from "./planner-context";
 import ConfirmDialog from "./ConfirmDialog";
-import { canDelete, isSampleSlot, loadHideSamples, restoreSamples as withSamplesRestored, saveHideSamples, samplesHidden, TRASH_RETENTION_DAYS } from "@/trash";
+import { canDelete, loadHideSamples, restoreSamples as withSamplesRestored, saveHideSamples, samplesHidden, TRASH_RETENTION_DAYS } from "@/trash";
 // v8 Part 2: the shell's state lives in focused hooks (src/components/planner/); this file wires them together.
 import { afterPaint, download, focusTarget } from "./planner/dom";
 import { linksTo, usePlanCommits, usePlanHistory } from "./planner/usePlanHistory";
@@ -202,7 +202,6 @@ export default function PlannerApp({ children }: { children?: ReactNode }) {
   const ownCount = events.mine.length;
   // Samples can only be hidden while there is an event of the organizer's own ("Explore a sample" never disappears).
   const hideSamples: boolean | null = ownCount > 0 ? samplesHidden(hidePref, ownCount) : null;
-  const activeIsSample = isSampleSlot(store.active, plan);
   // v8 Part 0d: every event deleted (samples too). The setup form shows, with "Restore samples"; never a blank screen.
   const noEvents = events.mine.length === 0 && events.samples.length === 0;
   /** "Restore samples" in the event menu: some sample was deleted, or the samples are hidden. */
@@ -315,16 +314,16 @@ export default function PlannerApp({ children }: { children?: ReactNode }) {
   // v8 Part 2: the context value only changes when what it shows changes (not on every toast or drawer toggle), and its
   // functions keep their identity: each is a stable handle onto this render's version.
   const handlers = useStableHandlers({ commit, commitUndoable, flash, showInsight, ask: askFromDashboard, scan: scanFromDashboard, createPlan, requestIdeas, requestVendorQuestions,
-    requestDelete: () => requestDelete(storeRef.current.active), resetSample: resetTemplate, restoreSamples: restoreSampleEvents,
+    requestDelete: () => requestDelete(storeRef.current.active), restoreSamples: restoreSampleEvents,
     publish: () => void shared.publish(), syncNow: shared.syncNow, resetInvite: shared.resetInvite, setJoinLink: shared.setJoinLink, resetRsvpLink: shared.resetRsvpLink,
     openShare: () => setShareOpen(true) });
   const ctx: PlannerState = useMemo(() => ({ plan, today, insights, template, role, highlight, busy, commit: handlers.commit, commitUndoable: handlers.commitUndoable,
     flash: handlers.flash, showInsight: handlers.showInsight, ask: handlers.ask, scan: handlers.scan,
     createPlan: handlers.createPlan, requestIdeas: handlers.requestIdeas, ideasBusy, aiMode: mode, forceOffline, requestVendorQuestions: handlers.requestVendorQuestions,
-    eventActions: { isSample: activeIsSample, requestDelete: handlers.requestDelete, resetSample: handlers.resetSample, noEvents, restoreSamples: handlers.restoreSamples },
+    eventActions: { requestDelete: handlers.requestDelete, noEvents, restoreSamples: handlers.restoreSamples },
     sharing: { share: shared.share, status: shared.status, publish: handlers.publish, syncNow: handlers.syncNow, resetInvite: handlers.resetInvite, setJoinLink: handlers.setJoinLink,
       resetRsvpLink: handlers.resetRsvpLink, openShare: handlers.openShare } }),
-  [plan, today, insights, template, role, highlight, busy, ideasBusy, mode, forceOffline, activeIsSample, noEvents, shared.share, shared.status, handlers]);
+  [plan, today, insights, template, role, highlight, busy, ideasBusy, mode, forceOffline, noEvents, shared.share, shared.status, handlers]);
   const offPage = elsewhere.filter(p => p.id !== currentPage.id);
 
   if (opening === "signin" || opening === "wait") {
@@ -394,7 +393,7 @@ export default function PlannerApp({ children }: { children?: ReactNode }) {
       {/* The page scrolls as one document. The bottom padding (--fab-space) keeps the last content clear of the floating
           Co-Pilot launcher; below 768px the organizer view also reserves room for the bottom tab bar and its safe-area inset. */}
       <main id="main" tabIndex={-1} data-testid="dashboard" data-page={guest ? "guest" : onSetup ? "setup" : currentPage.id}
-        className={`min-w-0 px-3 pb-[calc(var(--fab-space)+env(safe-area-inset-bottom))] pt-4 focus-visible:outline-none sm:px-4 lg:px-6 lg:pt-6 ${guest ? "" : "max-md:pb-[calc(var(--tabbar-h)+env(safe-area-inset-bottom)+var(--fab-space))]"}`}>
+        className={`min-w-0 px-4 pb-[calc(var(--fab-space)+env(safe-area-inset-bottom))] pt-6 focus-visible:outline-none sm:px-6 lg:px-8 lg:pt-8 ${guest ? "" : "max-md:pb-[calc(var(--tabbar-h)+env(safe-area-inset-bottom)+var(--fab-space))]"}`}>
         {guest ? (
           <GuestMicrosite template={template} plan={plan} today={today} commit={commit} highlight={highlight} actingEntryId={actingEntryId} setActingEntryId={setActingGuest}
             summary={<KpiStrip kpis={kpisFor("guest", plan.event.eventType)} ctx={kpiCtx} guest />} />

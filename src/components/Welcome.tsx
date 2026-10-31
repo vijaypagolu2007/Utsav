@@ -27,43 +27,43 @@ export default function Welcome({ onCreate, onSample }: { onCreate: (s: SetupInp
     <div className="min-h-dvh w-full bg-canvas">
       <a href="#main" className="sr-only rounded-lg bg-sand-900 text-sm font-semibold text-white shadow-lg focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50 focus:px-4 focus:py-3">Skip to main content</a>
       <header className="festive-rule relative border-b border-line bg-surface">
-        <div className="mx-auto flex max-w-5xl items-center gap-2.5 px-4 py-3">
+        <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
           <div aria-hidden="true" className="logo-tile grid h-9 w-9 shrink-0 place-items-center rounded-xl shadow-sm"><PartyPopper size={18} /></div>
-          <p className="text-sm font-semibold uppercase tracking-wider text-ink-muted">Utsav Co-Pilot</p>
+          <p className="text-sm font-semibold text-ink">Utsav Co-Pilot</p>
           {/* Signing in is optional: it keeps a cloud copy of the plan. Setting up and the samples work without it. */}
           <Link href={SIGNIN_PATH} onClick={() => flushStore()} data-testid="welcome-signin"
-            className="ml-auto flex min-h-11 items-center gap-1.5 whitespace-nowrap rounded-lg border border-line-strong bg-surface px-3 text-sm font-medium text-sand-800 hover:bg-sand-100">
+            className="ml-auto flex min-h-9 items-center gap-2 whitespace-nowrap rounded-lg border border-line-strong bg-surface px-4 text-sm font-semibold text-sand-800 hover:bg-sand-100 active:bg-sand-200 max-md:min-h-11 pointer-coarse:min-h-11">
             <LogIn size={16} aria-hidden="true" className="text-brand-700" /> Sign in
           </Link>
         </div>
       </header>
-      <main id="main" tabIndex={-1} data-testid="welcome" className="mx-auto max-w-5xl px-4 py-6 focus-visible:outline-none sm:py-10">
+      <main id="main" tabIndex={-1} data-testid="welcome" className="mx-auto w-full max-w-5xl px-4 pb-16 pt-6 focus-visible:outline-none sm:px-6 sm:pt-12">
         {planning ? (
           <SetupWizard onCreate={onCreate} onCancel={() => setPlanning(false)} cancelLabel="Back to welcome" onDone={() => router.push("/")} />
         ) : (
-          <div className="festive-hero space-y-6 rounded-2xl p-5 sm:p-8" data-event-type="wedding">
+          <div className="festive-hero space-y-8 rounded-2xl p-4 shadow-sm sm:p-8 lg:p-10" data-event-type="wedding">
             <div className="max-w-2xl">
               <h1 ref={heading} tabIndex={-1} className="text-3xl font-semibold leading-tight text-ink focus-visible:outline-offset-4 sm:text-4xl">Plan your celebration, your way</h1>
-              <p className="mt-2 text-base text-ink-muted">Weddings, birthdays and community festivals: tell us the basics and your budget, and the Co-Pilot drafts the sub-events, tasks, timeline and ideas. Every rupee is computed by code, never guessed.</p>
+              <p className="mt-3 text-base leading-relaxed text-ink-muted">Weddings, birthdays and community festivals: tell us the basics and your budget, and the Co-Pilot drafts the sub-events, tasks, timeline and ideas. Every rupee is computed by code, never guessed.</p>
             </div>
-            <div className="grid gap-4 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-              <section aria-labelledby="welcome-plan" className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
+            <div className="grid gap-6 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+              <section aria-labelledby="welcome-plan" className="rounded-xl border border-line bg-surface p-4 shadow-sm sm:p-6">
                 <h2 id="welcome-plan" className="flex items-center gap-2 text-lg font-semibold text-ink"><Sparkles size={18} aria-hidden="true" className="text-brand-700" />Plan my event</h2>
                 <p className="mt-1 text-sm text-ink-muted">About two minutes: type, city, dates, guests, budget, and anything special. Then choose how much goes where.</p>
-                <ul className="mt-3 space-y-1.5 text-sm text-ink">
+                <ul className="mt-4 space-y-2 text-sm text-ink">
                   {["Sub-events and tasks that fit your tradition and city", "Your own amounts kept exactly, to the paisa", "Ideas for decor, food, gifts and more, sized to what's left"].map(t => (
                     <li key={t} className="flex items-start gap-2"><CheckCircle2 size={16} aria-hidden="true" className="mt-0.5 shrink-0 text-emerald-700" />{t}</li>
                   ))}
                 </ul>
                 <button type="button" onClick={() => setPlanning(true)} data-testid="welcome-plan"
-                  className="mt-4 flex min-h-11 items-center gap-1.5 rounded-lg bg-primary px-5 text-sm font-semibold text-white hover:bg-primary-hover">
+                  className="mt-6 flex min-h-11 items-center gap-2 rounded-lg bg-primary px-5 text-sm font-semibold text-white shadow-sm hover:bg-primary-hover active:bg-brand-900">
                   Start planning<ArrowRight size={16} aria-hidden="true" />
                 </button>
               </section>
-              <section aria-labelledby="welcome-sample" className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
+              <section aria-labelledby="welcome-sample" className="rounded-xl border border-line bg-surface p-4 shadow-sm sm:p-6">
                 <h2 id="welcome-sample" className="text-lg font-semibold text-ink">Explore a sample</h2>
                 <p className="mt-1 text-sm text-ink-muted">See a fully planned event first. You can start your own any time from More, New plan.</p>
-                <ul className="mt-3 space-y-2">
+                <ul className="mt-4 space-y-2">
                   {TEMPLATES.map(t => {
                     const Icon = ICON[t.eventType] ?? PartyPopper;
                     return (

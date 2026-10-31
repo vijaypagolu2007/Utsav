@@ -39,7 +39,7 @@ function Dependencies({ plan, task, commit }: { plan: AgentState; task: AgentSta
           <div>
             <label htmlFor={`${id}-add`} className="sr-only">Add a task that {task.title} waits for</label>
             <select id={`${id}-add`} value="" data-testid={`dep-add-${task.id}`} onChange={e => { const v = e.target.value; if (v) set([...task.dependsOn, v], `"${task.title}" waits for "${plan.tasks.find(x => x.id === v)?.title}"`); }}
-              className="h-9 w-full rounded-lg border border-line-strong bg-surface px-2 text-sm text-ink max-md:h-11">
+              className="h-9 w-full rounded-lg border border-line-strong bg-surface px-3 text-sm text-ink max-md:h-11">
               <option value="">Add a task it waits for…</option>
               {options.map(o => <option key={o.id} value={o.id}>{o.title}</option>)}
             </select>
@@ -66,7 +66,7 @@ export default function TaskCard({ plan, today, commit, highlight }: { plan: Age
       subtitle="Due date = sub-event date + offset. Ordered by priority, then due date. Select a task to move it to the next status.">
       {rows.length === 0 ? <Empty>No tasks yet.</Empty> : (
         /* Full-width page: the status groups sit side by side as columns once each can be 18rem wide. */
-        <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[repeat(auto-fit,minmax(18rem,1fr))]">
+        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[repeat(auto-fit,minmax(18rem,1fr))]">
           {groups.map(g => {
             const items = rows.filter(r => r.t.status === g.key);
             const Icon = g.icon;
@@ -76,7 +76,7 @@ export default function TaskCard({ plan, today, commit, highlight }: { plan: Age
                   <Icon size={17} aria-hidden="true" className={ICON_TONE[g.key]} /> {g.label}
                   <span className="rounded-full bg-surface-muted px-2 text-sm font-medium tabular-nums text-sand-700 ring-1 ring-inset ring-line">{items.length}<span className="sr-only"> tasks</span></span>
                 </h3>
-                {items.length === 0 ? <p className="rounded-lg border border-dashed border-line-strong px-3 py-2.5 text-sm text-ink-muted">Nothing here yet</p> : (
+                {items.length === 0 ? <p className="rounded-lg border border-dashed border-line-strong px-4 py-3 text-sm text-ink-muted">Nothing here yet</p> : (
                   <ul className="space-y-2">
                     {items.map(({ t, due, se }) => {
                       const d = daysBetween(today, due);
@@ -89,7 +89,7 @@ export default function TaskCard({ plan, today, commit, highlight }: { plan: Age
                             onSave={(name: string) => saveWith(commit, { summary: `Rename task "${t.title}"`, commands: [{ op: "rename_entity", kind: "task", id: t.id, name }] })}>
                           <button type="button" id={refAnchor(t.id)}
                             onClick={() => commit({ summary: `Task "${t.title}" → ${NEXT[t.status]}`, commands: [{ op: "set_task_status", taskId: t.id, status: NEXT[t.status] }] })}
-                            className={`block w-full rounded-xl border bg-surface px-3 py-2.5 text-left transition hover:border-sand-400 hover:bg-sand-50 ${overdue ? "border-red-300 border-l-4 border-l-red-600" : soon ? "border-amber-300 border-l-4 border-l-amber-600" : "border-line"} ${hl(t.id)}`}>
+                            className={`block w-full rounded-lg border bg-surface px-3 py-3 text-left transition hover:border-sand-400 hover:bg-sand-50 ${overdue ? "border-red-300 border-l-4 border-l-red-600" : soon ? "border-amber-300 border-l-4 border-l-amber-600" : "border-line"} ${hl(t.id)}`}>
                             <span className={`block text-base font-medium leading-snug ${t.status === "done" ? "text-ink-muted line-through" : "text-ink"}`}>{t.title}</span>
                             <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
                               <span className={`text-sm font-semibold tabular-nums ${!open ? "text-ink-muted" : overdue ? "text-red-700" : soon ? "text-amber-800" : "text-sand-700"}`}>{prettyDate(due)}</span>

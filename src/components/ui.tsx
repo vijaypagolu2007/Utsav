@@ -46,10 +46,10 @@ export function useMediaQuery(query: string, serverDefault = true): boolean {
 export function SectionHeader({ title, subtitle, icon, id, right, level = 2 }: { title: string; subtitle?: ReactNode; icon?: ReactNode; id?: string; right?: ReactNode; level?: 2 | 3 }) {
   const H = level === 2 ? "h2" : "h3";
   return (
-    <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-      <div className="min-w-0">
-        <H id={id} className={`flex min-w-0 items-center gap-2 font-semibold text-ink ${level === 2 ? "text-lg leading-snug" : "text-base"}`}>{icon && <span aria-hidden="true" className="shrink-0">{icon}</span>}{title}</H>
-        {subtitle && <p className="mt-0.5 text-sm text-ink-muted">{subtitle}</p>}
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+      <div className="min-w-0 flex-1 basis-56">
+        <H id={id} className={`flex min-w-0 items-center gap-2 font-semibold text-ink [text-wrap:balance] ${level === 2 ? "text-lg leading-snug" : "text-base leading-snug"}`}>{icon && <span aria-hidden="true" className="grid shrink-0 place-items-center">{icon}</span>}{title}</H>
+        {subtitle && <p className="mt-1 text-sm leading-relaxed text-ink-muted">{subtitle}</p>}
       </div>
       {right}
     </div>
@@ -60,13 +60,37 @@ export function SectionHeader({ title, subtitle, icon, id, right, level = 2 }: {
 export function Card({ title, subtitle, icon, right, children, className = "", id, bodyClassName = "" }: { title: string; subtitle?: ReactNode; icon?: ReactNode; right?: ReactNode; children: ReactNode; className?: string; id?: string; bodyClassName?: string }) {
   const hid = `${useId()}-h`;
   return (
-    <section id={id} tabIndex={id ? -1 : undefined} aria-labelledby={hid} className={`min-w-0 rounded-2xl focus-visible:outline-offset-4 border border-line bg-surface shadow-sm ${className}`}>
-      <header className="border-b border-line-soft px-4 py-3.5 sm:px-5">
+    <section id={id} tabIndex={id ? -1 : undefined} aria-labelledby={hid} className={`min-w-0 rounded-xl border border-line bg-surface shadow-sm focus-visible:outline-offset-4 ${className}`}>
+      <header className="border-b border-line-soft px-4 py-4 sm:px-6">
         <SectionHeader id={hid} title={title} subtitle={subtitle} icon={icon} right={right} />
       </header>
-      <div className={`p-4 sm:p-5 ${bodyClassName}`}>{children}</div>
+      <div className={`p-4 sm:p-6 ${bodyClassName}`}>{children}</div>
     </section>
   );
+}
+
+// ---------- buttons ----------
+/**
+ * One button recipe for the whole app (ui-ux-pro-max shadcn "component variants"): primary, secondary (outlined),
+ * ghost (text) and danger (outlined red). Sizes: sm 32px, md 36px (44px below 768px and on coarse pointers), lg 44px.
+ * Colour, border and shadow ease over 200ms (globals.css); active goes one step darker; disabled dims and stops the pointer.
+ */
+const BUTTON_VARIANT = {
+  primary: "bg-primary text-white shadow-sm hover:bg-primary-hover active:bg-brand-900",
+  secondary: "border border-line-strong bg-surface text-sand-800 hover:bg-sand-100 active:bg-sand-200",
+  ghost: "text-brand-800 hover:bg-brand-50 active:bg-brand-100",
+  danger: "border border-red-600 bg-surface text-red-700 hover:bg-red-50 active:bg-red-100",
+} as const;
+const BUTTON_SIZE = {
+  sm: "min-h-8 px-3 max-md:min-h-11 pointer-coarse:min-h-11",
+  md: "min-h-9 px-4 max-md:min-h-11 pointer-coarse:min-h-11",
+  lg: "min-h-11 px-5",
+} as const;
+export type ButtonVariant = keyof typeof BUTTON_VARIANT;
+export const buttonClass = (variant: ButtonVariant = "secondary", size: keyof typeof BUTTON_SIZE = "md", className = "") =>
+  `inline-flex shrink-0 items-center justify-center gap-2 rounded-lg text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${BUTTON_SIZE[size]} ${BUTTON_VARIANT[variant]} ${className}`;
+export function Button({ variant = "secondary", size = "md", className = "", type = "button", ...rest }: { variant?: ButtonVariant; size?: keyof typeof BUTTON_SIZE } & ButtonHTMLAttributes<HTMLButtonElement>) {
+  return <button type={type} {...rest} className={buttonClass(variant, size, className)} />;
 }
 
 /**
@@ -106,7 +130,7 @@ export function Chip({ tone = "neutral", icon, children, className = "", title }
 export function IconButton({ label, children, className = "", ...rest }: { label: string; children: ReactNode } & Omit<ButtonHTMLAttributes<HTMLButtonElement>, "aria-label" | "children">) {
   return (
     <button type="button" aria-label={label} title={label} {...rest}
-      className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line-strong bg-surface text-sand-700 hover:bg-sand-100 disabled:cursor-not-allowed disabled:opacity-50 max-md:h-11 max-md:w-11 pointer-coarse:h-11 pointer-coarse:w-11 ${className}`}>
+      className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line-strong bg-surface text-sand-700 hover:bg-sand-100 hover:text-ink active:bg-sand-200 disabled:cursor-not-allowed disabled:opacity-50 max-md:h-11 max-md:w-11 pointer-coarse:h-11 pointer-coarse:w-11 ${className}`}>
       <span aria-hidden="true">{children}</span>
     </button>
   );
@@ -133,8 +157,9 @@ export function FigureTag({ kind, className = "" }: { kind: FigureKind | "unveri
   return <span data-figure={kind}><Chip tone={map.tone} icon={map.icon} title={map.title} className={className}>{map.text}</Chip></span>;
 }
 
+/** An empty state: a quiet dashed box with the message (and, from the caller, the next step). */
 export function Empty({ children }: { children: ReactNode }) {
-  return <p className="rounded-lg border border-dashed border-line-strong p-4 text-center text-sm text-ink-muted">{children}</p>;
+  return <p className="rounded-xl border border-dashed border-line-strong bg-canvas px-4 py-6 text-center text-sm leading-relaxed text-ink-muted">{children}</p>;
 }
 
 // ---------- inline editing ----------
@@ -177,7 +202,7 @@ export const saveWith = (commit: (b: BatchInput) => BatchResult, batch: BatchInp
  * parsing or from the reducer) stay visible under the input, linked with aria-describedby, until the next try.
  * Targets are 32px on desktop and 44px on touch-sized screens and coarse pointers.
  */
-export function InlineEdit({ label, value, kind = "text", onSave, children, className = "", grow = false, inputSize = "w-56", hint, testId, large = false }: {
+export function InlineEdit({ label, value, kind = "text", onSave, children, className = "", grow = false, inputSize = "w-56", hint, testId, large = false, top = false }: {
   /** Names the field ("Name of budget line Haldi marigold decor"); the button is "Edit <label>". */
   label: string;
   /** The current value as the input should show it: text, whole rupees, or "HH:MM". */
@@ -193,6 +218,8 @@ export function InlineEdit({ label, value, kind = "text", onSave, children, clas
   testId?: string;
   /** v8 Part 1e: 44px targets at every width (the run-sheet), not just on touch-sized screens. */
   large?: boolean;
+  /** v8 Part 3b: pin the pencil to the first line (a heading that can wrap) instead of centring it on the block. */
+  top?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -223,7 +250,7 @@ export function InlineEdit({ label, value, kind = "text", onSave, children, clas
 
   if (!editing) {
     return (
-      <div className={`flex min-w-0 items-center gap-1 ${grow ? "flex-1" : ""} ${className}`}>
+      <div className={`flex min-w-0 ${top ? "items-start" : "items-center"} gap-1 ${grow ? "flex-1" : ""} ${className}`}>
         <div className={`min-w-0 ${grow ? "flex-1" : ""}`}>{children}</div>
         <button ref={btn} type="button" onClick={start} aria-label={`Edit ${label}`} title={`Edit ${label}`} data-testid={testId}
           className={`grid ${pencil} shrink-0 place-items-center rounded-md text-ink-muted hover:bg-sand-100 hover:text-ink`}>
